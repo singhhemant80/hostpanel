@@ -196,7 +196,7 @@ chmod 600 /etc/hostpanel/agent.env
 log "Build"
 cd "$DIR"
 export PATH="$NODE:$PATH"
-npm ci --no-audit --no-fund
+npm ci --include=dev --no-audit --no-fund
 npm run build
 (cd apps/api && node dist/migrate.js)
 FIRST_RUN=0

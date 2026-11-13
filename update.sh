@@ -8,7 +8,7 @@ cd "$DIR"
 # the code is root-owned (the root agent runs from it), so update as root
 git fetch -q origin "$BRANCH"
 git reset -q --hard "origin/$BRANCH"
-npm ci --no-audit --no-fund
+npm ci --include=dev --no-audit --no-fund
 npm run build
 chmod -R a+rX,go-w "$DIR"; chown root:hostpanel apps/api/.env; chmod 640 apps/api/.env
 (cd apps/api && node dist/migrate.js)
