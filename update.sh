@@ -3,13 +3,14 @@
 set -euo pipefail
 DIR="${1:-/opt/hostpanel}"
 BRANCH="$(git -C "$DIR" rev-parse --abbrev-ref HEAD)"
-export PATH="/opt/hostpanel/runtimes/node/22/bin:$PATH"
+export PATH="/opt/hostpanel-runtimes/node/22/bin:$PATH"
 cd "$DIR"
-sudo -u hostpanel git fetch -q origin "$BRANCH"
-sudo -u hostpanel git reset -q --hard "origin/$BRANCH"
-sudo -u hostpanel npm ci --no-audit --no-fund
-sudo -u hostpanel npm run build
-set -a; . apps/api/.env; set +a
-(cd apps/api && sudo -E -u hostpanel node dist/migrate.js)
+# the code is root-owned (the root agent runs from it), so update as root
+git fetch -q origin "$BRANCH"
+git reset -q --hard "origin/$BRANCH"
+npm ci --no-audit --no-fund
+npm run build
+chmod -R a+rX,go-w "$DIR"; chown root:hostpanel apps/api/.env; chmod 640 apps/api/.env
+(cd apps/api && node dist/migrate.js)
 systemctl restart hostpanel-agent hostpanel-api
 echo "HostPanel updated to $(git rev-parse --short HEAD)"

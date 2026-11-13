@@ -39,7 +39,10 @@ done
 [[ -n "$DOMAIN" && -n "$EMAIL" ]] || { echo "Usage: install.sh --domain panel.example.com --email you@example.com"; exit 1; }
 
 log() { echo -e "\n\033[1;34m==> $*\033[0m"; }
-RUNTIMES=/opt/hostpanel/runtimes
+RUNTIMES=/opt/hostpanel-runtimes
+PYTHONS=/opt/hostpanel-runtimes/pythons
+# Managed Pythons only: never pick up the system /usr/bin/python3
+export UV_PYTHON_PREFERENCE=only-managed
 export DEBIAN_FRONTEND=noninteractive
 
 log "System packages"
@@ -93,17 +96,22 @@ NODE="$RUNTIMES/node/22/bin"
 log "Python ${PY_VERSIONS} (uv)"
 [[ -x /usr/local/bin/uv ]] || curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin INSTALLER_NO_MODIFY_PATH=1 sh
 for v in $PY_VERSIONS; do
-  UV_PYTHON_INSTALL_DIR=/opt/hostpanel/pythons /usr/local/bin/uv python install "$v"
-  py=$(UV_PYTHON_INSTALL_DIR=/opt/hostpanel/pythons /usr/local/bin/uv python find "$v")
+  UV_PYTHON_INSTALL_DIR=$PYTHONS /usr/local/bin/uv python install "$v"
+  py=$(UV_PYTHON_INSTALL_DIR=$PYTHONS /usr/local/bin/uv python find "$v")
   mkdir -p "$RUNTIMES/python/$v"
   ln -sfn "$(dirname "$py")" "$RUNTIMES/python/$v/bin"
   [[ -e "$(dirname "$py")/python" ]] || ln -sf "$py" "$(dirname "$py")/python"
 done
-chmod -R a+rX /opt/hostpanel/runtimes /opt/hostpanel/pythons
+chown -R root:root "$RUNTIMES"; chmod -R a+rX,go-w "$RUNTIMES"
 
 log "HostPanel code → $DIR"
 id hostpanel >/dev/null 2>&1 || useradd --system --home-dir "$DIR" --shell /usr/sbin/nologin hostpanel
-if [[ -d "$DIR/.git" ]]; then git -C "$DIR" fetch -q origin "$BRANCH" && git -C "$DIR" checkout -q -B "$BRANCH" "origin/$BRANCH"
+if [[ -d "$DIR" && ! -d "$DIR/.git" ]]; then
+  # left over from an interrupted earlier install: keep it aside, start clean
+  mv "$DIR" "$DIR.old-$(date +%s)"
+fi
+[[ -d "$DIR/.git" ]] && chown -R root:root "$DIR"   # git refuses folders owned by another user
+if [[ -d "$DIR/.git" ]]; then git -C "$DIR" fetch -q origin "$BRANCH" && git -C "$DIR" checkout -q -f -B "$BRANCH" "origin/$BRANCH"
 else git clone -q --branch "$BRANCH" "$REPO" "$DIR"; fi
 
 log "Folders and groups"
@@ -198,7 +206,7 @@ if ! sudo -u postgres psql -tAqd hostpanel -c "select 1 from users limit 1" | gr
 else
   (cd apps/api && node dist/seed.js)
 fi
-chown -R hostpanel:hostpanel "$DIR"; chown root:hostpanel "$ENV"
+chown -R root:root "$DIR"; chmod -R a+rX,go-w "$DIR"; chown root:hostpanel "$ENV"; chmod 640 "$ENV"
 
 log "Services"
 cat > /etc/systemd/system/hostpanel-api.service <<EOF
@@ -215,7 +223,7 @@ Restart=always
 RestartSec=3
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=$DIR/apps/api /var/lib/hostpanel/uploads /var/lib/hostpanel/downloads
+ReadWritePaths=/var/lib/hostpanel/uploads /var/lib/hostpanel/downloads
 ProtectHome=yes
 PrivateTmp=yes
 [Install]

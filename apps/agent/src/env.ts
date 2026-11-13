@@ -14,7 +14,7 @@ export const env = {
   caddyAdmin: process.env.CADDY_ADMIN ?? "http://127.0.0.1:2019",
   caddyfile: process.env.CADDYFILE ?? "/etc/caddy/Caddyfile",
   panelUpstream: process.env.PANEL_UPSTREAM ?? "127.0.0.1:4100",
-  runtimesDir: process.env.RUNTIMES_DIR ?? "/opt/hostpanel/runtimes",
+  runtimesDir: process.env.RUNTIMES_DIR ?? "/opt/hostpanel-runtimes",
   buildTimeoutSec: parseInt(process.env.BUILD_TIMEOUT_SEC ?? "900", 10),
   /** Group the panel API runs as; deploy logs are readable by it. */
   panelGroup: process.env.PANEL_GROUP ?? "hostpanel",
