@@ -125,16 +125,14 @@ export async function applyCaddyfile(content: string): Promise<void> {
   await writeFileAtomic(env.caddyfile, content, 0o640);
   await run("chgrp", [env.webUser, env.caddyfile], { allowFail: true });
   if (env.dryRun) {
-    console.log(`[dry-run] POST ${env.caddyAdmin}/load (${content.length} bytes)`);
+    console.log(`[dry-run] caddy reload --config ${env.caddyfile}`);
     return;
   }
-  const res = await fetch(`${env.caddyAdmin}/load`, {
-    method: "POST",
-    headers: { "Content-Type": "text/caddyfile" },
-    body: content,
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Caddy rejected the config (${res.status}): ${text.slice(0, 800)}`);
+  // `caddy reload` is Caddy's own client for its admin API: it sends the Origin/Host headers newer
+  // Caddy versions insist on, validates the file first and keeps certificates. Zero downtime.
+  const r = await run("caddy", ["reload", "--config", env.caddyfile, "--adapter", "caddyfile"], { allowFail: true, timeoutSec: 60 });
+  if (r.code !== 0) {
+    const msg = (r.stderr || r.stdout).split("\n").filter((l) => !/"level":"(info|warn)"/.test(l)).join(" ").trim();
+    throw new Error(`Caddy rejected the config: ${msg.slice(0, 800)}`);
   }
 }
