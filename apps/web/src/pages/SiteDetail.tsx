@@ -467,9 +467,13 @@ function SettingsTab({ site }: { site: Site }) {
           <Field label={t("sites.rootDir")}>
             <Input value={form.rootDir} onChange={(e) => set("rootDir", e.target.value.trim())} />
           </Field>
-          {(form.runtime === "php" || form.runtime === "static") && (
+          {form.runtime === "php" || form.runtime === "static" ? (
             <Field label={t("sites.publicDir")}>
               <Input value={form.publicDir} onChange={(e) => set("publicDir", e.target.value.trim())} />
+            </Field>
+          ) : (
+            <Field label={t("sites.staticDir")} hint={t("sites.staticDirHint")}>
+              <Input placeholder="public-site" value={form.publicDir} onChange={(e) => set("publicDir", e.target.value.trim())} />
             </Field>
           )}
           <Field label={t("sites.buildCmd")}>

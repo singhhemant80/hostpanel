@@ -91,7 +91,9 @@
       "add": "Add process",
       "redis": "Private Redis",
       "redisHelp": "A Redis only this site can use (password-protected, 256 MB, data kept across deploys). REDIS_URL is set for the app, its processes and the build."
-    }
+    },
+    "staticDir": "Static files folder (optional)",
+    "staticDirHint": "Files in this folder (e.g. a plain HTML homepage) are served directly; every other path goes to your app. Relative to the root folder."
   },
   "github": {
     "repo": "Repository (owner/repo)",

@@ -70,7 +70,14 @@ export function routeFor(domain: Domain, site: SiteWithAccount, portsBySite?: Ma
         .filter((r): r is { path: string; port: number } => Boolean(r.path && r.port))
         .map((r) => ({ ...r, instances: 1 }));
       const all = [...(base.paths ?? []), ...own.filter((o) => !(base.paths ?? []).some((p) => p.path === o.path))];
-      return { ...base, ...(all.length ? { paths: all } : {}), kind: "proxy", port: site.port ?? undefined, instances: site.instances };
+      return {
+        ...base,
+        ...(all.length ? { paths: all } : {}),
+        kind: "proxy",
+        port: site.port ?? undefined,
+        instances: site.instances,
+        ...(site.publicDir ? { root: docRoot(site) } : {}),
+      };
     }
     default:
       return { ...base, kind: "static", root: docRoot(site) };

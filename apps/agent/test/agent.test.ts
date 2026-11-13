@@ -155,3 +155,12 @@ test("extra processes and private Redis: ports, env, validation", async () => {
   assert.throws(() => parsePayload("site.provision", { site: { ...s2, processes: [{ name: "a.b", command: "x", path: null }] } }));
   assert.throws(() => parsePayload("site.provision", { site: { ...s2, processes: [{ name: "api", command: "x", path: "/api/* {\n}" }] } }));
 });
+
+test("Caddyfile: a static folder in front of a Node app serves existing files, the rest goes to the app", () => {
+  const out = buildCaddyfile([{ hostname: "acme.in", kind: "proxy", siteName: "web", linuxUser: "hp_acme", port: 20000, instances: 1, root: "/home/hp_acme/sites/web/current/public-site" }], null, null);
+  assert.match(out, /root \* \/home\/hp_acme\/sites\/web\/current\/public-site/);
+  assert.match(out, /file \{path\} \{path\}\.html \{path\}\/index\.html/);
+  assert.match(out, /not path_regexp .*\(ini\|/);
+  assert.ok(out.indexOf("handle @hp_static") < out.indexOf("reverse_proxy 127.0.0.1:20000"));
+  assert.ok(!buildCaddyfile([{ hostname: "acme.in", kind: "proxy", siteName: "web", linuxUser: "hp_acme", port: 20000, instances: 1 }], null, null).includes("hp_static"));
+});

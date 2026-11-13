@@ -106,7 +106,22 @@ ${ind}php_fastcgi unix/${phpSocket(r.linuxUser, r.siteName)}
 ${ind}file_server`;
         break;
       case "proxy":
-        main = proxy(r.port!, r.instances ?? 1, ind);
+        // Optional static folder in front of the app (e.g. a plain HTML homepage next to a Next.js
+        // app): existing files are served by Caddy, every other path goes to the app.
+        main = r.root
+          ? `${ind}root * ${r.root}
+${ind}@hp_static {
+${ind}\tfile {path} {path}.html {path}/index.html
+${ind}\tnot path_regexp (?i)(/\\.|\\.(ini|zip|sql|rdb|dump|log|bak|old|orig|swp|env|sh|py|php|conf|cnf|ya?ml|toml|lock|tar|t?gz|bz2|7z|rar|db|sqlite3?)$)
+${ind}}
+${ind}handle @hp_static {
+${ind}\trewrite * {file_match.relative}
+${ind}\tfile_server
+${ind}}
+${ind}handle {
+${proxy(r.port!, r.instances ?? 1, ind + "\t")}
+${ind}}`
+          : proxy(r.port!, r.instances ?? 1, ind);
         break;
       default:
         main = `${ind}root * ${r.root}
