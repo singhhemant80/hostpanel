@@ -1,5 +1,6 @@
+import { realpath } from "node:fs/promises";
 import { paths, type JobPayloads, type SiteSpec } from "@hostpanel/shared";
-import { env } from "../env.js";
+import { env, sys } from "../env.js";
 import { cronRemoveAll } from "./cron.js";
 import { run } from "../exec.js";
 import { ensureDir, exists, readLink, removePath, swapSymlink, writeFileAtomic } from "../fsx.js";
@@ -47,7 +48,7 @@ export async function siteProvision({ site }: JobPayloads["site.provision"]): Pr
   await run("chown", ["-R", "--no-dereference", `${u}:${u}`, root]);
   // Caddy reads site files and writes access logs (see accountCreate for why ACLs).
   await run("setfacl", ["-R", "-m", `u:${env.webUser}:rX,d:u:${env.webUser}:rX`, root]);
-  await run("setfacl", ["-m", `u:${env.webUser}:rwx,d:u:${env.webUser}:rw`, paths.logs(u, site.name)]);
+  await fixLogAcl(u, site.name);
 
   await removeServiceUnits(site).catch(() => undefined);
   await removePhpPool(site).catch(() => undefined);
@@ -84,4 +85,16 @@ export async function siteControl({ site, action }: JobPayloads["site.control"])
     if (action === "stop") await removePhpPool(site);
   }
   // static sites have no process; Caddy serves the files directly
+}
+
+/**
+ * Caddy appends to logs/access.log. A recursive chown/setfacl on the site (provision, restore) turns
+ * the existing file into the customer's with read-only access for Caddy, and Caddy then refuses to
+ * start. Give Caddy read+write on the folder and every file in it, now and for new files.
+ */
+export async function fixLogAcl(linuxUser: string, siteName: string): Promise<void> {
+  const dir = paths.logs(linuxUser, siteName);
+  // the customer owns this tree: never follow a symlink they may have put in place of the folder
+  if ((await realpath(sys(dir)).catch(() => null)) !== sys(dir)) return;
+  await run("setfacl", ["-R", "-P", "-m", `u:${env.webUser}:rwX,d:u:${env.webUser}:rwX`, dir]);
 }

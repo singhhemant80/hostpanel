@@ -7,6 +7,7 @@ import { decrypt, env, sys } from "../env.js";
 import { run } from "../exec.js";
 import { exists, readLink, swapSymlink } from "../fsx.js";
 import { restartApp } from "./deploy.js";
+import { fixLogAcl } from "./sites.js";
 
 /**
  * One backup = one .tar in /var/backups/hostpanel/<user>/ holding:
@@ -150,6 +151,7 @@ export async function backupRestore(p: JobPayloads["backup.restore"], job: Job):
       }
       await run("chown", ["-R", "--no-dereference", `${p.linuxUser}:${p.linuxUser}`, siteDir]);
       await run("setfacl", ["-R", "-m", `u:${env.webUser}:rX`, siteDir]);
+      await fixLogAcl(p.linuxUser, name);
       const logStream = createWriteStream("/dev/null");
       await restartApp(spec, { stream: logStream, line: () => undefined });
       logStream.end();

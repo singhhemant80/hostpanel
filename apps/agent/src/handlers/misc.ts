@@ -1,4 +1,5 @@
 import { hostname, loadavg, totalmem, freemem, uptime, cpus } from "node:os";
+import { fixLogAcl } from "./sites.js";
 import { statfs } from "node:fs/promises";
 import type { JobPayloads, SystemStats } from "@hostpanel/shared";
 import { decrypt } from "../env.js";
@@ -8,6 +9,14 @@ import { exists } from "../fsx.js";
 
 export async function routesSync(p: JobPayloads["routes.sync"]): Promise<{ routes: number }> {
   await writeCustomCerts(p.routes);
+  // Caddy refuses to start if it can't open any site's access.log, which would take every site down
+  const seen = new Set<string>();
+  for (const r of p.routes) {
+    const key = `${r.linuxUser}/${r.siteName}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    await fixLogAcl(r.linuxUser, r.siteName).catch(() => undefined);
+  }
   const webmail = Boolean(p.panelHostname) && (await exists(`${WEBMAIL_ROOT}/index.php`));
   await applyCaddyfile(buildCaddyfile(p.routes, p.panelHostname, p.acmeEmail, p.dnsTokenEnc ? decrypt(p.dnsTokenEnc) : null, webmail));
   return { routes: p.routes.length };
