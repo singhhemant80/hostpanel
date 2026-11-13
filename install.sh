@@ -63,7 +63,8 @@ log "System packages"
 apt-get update -q
 apt-get install -yq curl git ca-certificates gnupg jq zip unzip ufw quota acl rclone openssh-server debian-keyring debian-archive-keyring apt-transport-https \
   postgresql software-properties-common python3 python3-venv build-essential wireguard-tools
-[[ -z "$JOIN" ]] && apt-get install -yq redis-server
+apt-get install -yq redis-server   # the panel's queue on the main server; per-site private Redis everywhere
+[[ -n "$JOIN" ]] && systemctl disable --now redis-server >/dev/null 2>&1 || true
 if [[ $WITH_MAIL -eq 1 ]]; then
   echo "postfix postfix/main_mailer_type select Internet Site" | debconf-set-selections
   echo "postfix postfix/mailname string $DOMAIN" | debconf-set-selections

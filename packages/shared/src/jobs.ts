@@ -85,6 +85,35 @@ export interface SiteSpec {
   /** Background worker: runs under systemd like a web app but gets no domain or HTTP health check. */
   background: boolean;
   env: EncryptedEnvVar[];
+  /** Extra processes from the same release (API, queue worker, …). */
+  processes: SiteProcess[];
+  /** Private Redis for this site only (password-protected, its own port). */
+  redis: boolean;
+}
+
+/**
+ * An extra long-running process of a site, built with the site and restarted on deploy.
+ * With a path (e.g. "/api/*") it gets its own port and Caddy sends that path to it.
+ */
+export interface SiteProcess {
+  name: string;
+  command: string;
+  path: string | null;
+}
+
+/** Ports a site uses: main instances, then one per extra process, then Redis. */
+export function sitePortSlots(site: { instances: number; processes: SiteProcess[]; redis: boolean }): number {
+  return site.instances + site.processes.length + (site.redis ? 1 : 0);
+}
+export function processPort(site: { port: number | null; instances: number }, index: number): number | null {
+  return site.port === null ? null : site.port + site.instances + index;
+}
+export function redisPort(site: { port: number | null; instances: number; processes: SiteProcess[] }): number | null {
+  return site.port === null ? null : site.port + site.instances + site.processes.length;
+}
+/** PORT_API, PORT_WORKER … so processes (and the build) can find each other. */
+export function processEnvName(name: string): string {
+  return `PORT_${name.toUpperCase().replace(/-/g, "_")}`;
 }
 
 export type RouteKind = "php" | "proxy" | "static" | "redirect";

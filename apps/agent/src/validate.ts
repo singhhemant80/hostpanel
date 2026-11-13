@@ -58,6 +58,16 @@ export const siteSpec = z
     healthPath: z.string().regex(/^\/[A-Za-z0-9._~\/?=&%-]*$/),
     background: z.boolean(),
     env: z.array(envVar),
+    processes: z
+      .array(
+        z.object({
+          name: z.string().regex(/^[a-z][a-z0-9-]{0,15}$/).refine((n) => n !== "redis"),
+          command: z.string().min(1).max(1000),
+          path: z.string().regex(/^\/[A-Za-z0-9._\-\/]*\*?$/).nullable(),
+        }),
+      )
+      .max(6),
+    redis: z.boolean(),
   })
   .refine((s) => RUNTIME_VERSIONS[s.runtime].includes(s.runtimeVersion), "unsupported runtime version");
 
@@ -166,7 +176,7 @@ const schemas: { [K in JobType]: z.ZodType<JobPayloads[K]> } = {
   }),
   "server.addPeer": z.object({ publicKey: wgKey, address: z.string().regex(/^10\.88\.\d{1,3}\.\d{1,3}$/) }),
   "server.removePeer": z.object({ publicKey: wgKey }),
-  "stats.account": z.object({ linuxUser, units: z.array(z.string().regex(/^hp-[a-z0-9_-]+\.(service|slice)$/)).max(50) }),
+  "stats.account": z.object({ linuxUser, units: z.array(z.string().regex(/^hp-[a-z0-9_-]+(\.[a-z0-9-]+)?\.(service|slice)$/)).max(50) }),
 };
 
 export function parsePayload<T extends JobType>(type: string, data: unknown): JobPayloads[T] {

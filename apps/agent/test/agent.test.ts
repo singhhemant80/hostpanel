@@ -20,6 +20,8 @@ const site = {
   healthPath: "/",
   background: false,
   env: [],
+  processes: [] as { name: string; command: string; path: string | null }[],
+  redis: false,
 };
 
 test("rejects hostnames that could inject Caddyfile directives", () => {
@@ -138,4 +140,18 @@ test("Caddyfile: webmail is served under the panel hostname only when installed"
   assert.match(withWm, /handle \/webmail\/\*/);
   assert.match(withWm, /hostpanel-webmail\.sock/);
   assert.ok(withWm.indexOf("/webmail/*") < withWm.indexOf("reverse_proxy 127.0.0.1:4100"));
+});
+
+test("extra processes and private Redis: ports, env, validation", async () => {
+  const { decryptEnv, redisPassword } = await import("../src/runtime.js");
+  const s2 = { ...site, instances: 2, processes: [{ name: "api", command: "node dist/server.js", path: "/api/*" }, { name: "worker", command: "node dist/worker.js", path: null }], redis: true };
+  assert.ok(parsePayload("site.provision", { site: s2 }));
+  const e = decryptEnv(s2);
+  assert.equal(e.PORT_API, "20002");
+  assert.equal(e.PORT_WORKER, "20003");
+  assert.equal(e.REDIS_URL, `redis://:${redisPassword(s2)}@127.0.0.1:20004`);
+  assert.notEqual(redisPassword(s2), redisPassword({ ...s2, id: "other" }));
+  assert.throws(() => parsePayload("site.provision", { site: { ...s2, processes: [{ name: "redis", command: "x", path: null }] } }));
+  assert.throws(() => parsePayload("site.provision", { site: { ...s2, processes: [{ name: "a.b", command: "x", path: null }] } }));
+  assert.throws(() => parsePayload("site.provision", { site: { ...s2, processes: [{ name: "api", command: "x", path: "/api/* {\n}" }] } }));
 });

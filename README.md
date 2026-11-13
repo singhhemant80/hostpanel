@@ -42,6 +42,7 @@ Site layout on disk:
 | **Webmail** | `https://<panel>/webmail/` | Roundcube, served by Caddy under the panel hostname. |
 | **One-click apps** | One-click apps | WordPress (with MariaDB and admin user), Laravel, Next.js, Django (admin user, static files). Each becomes a normal site with releases and rollback; the admin password is shown once. |
 | **Resellers** | Admin → Resellers | Reseller logins create and manage their own customers' accounts, limited to a number of accounts, total disk, and the packages you allow. They never see other accounts. |
+| **Extra processes & private Redis** | Site → Settings | One build, several programs: e.g. web + API + queue worker from one monorepo. Each process gets its own port (`$PORT`, and `PORT_<NAME>` for the others); give it a path like `/api/*` and Caddy sends that part of the site's domains to it. A private, password-protected Redis per site sets `REDIS_URL` (never share the panel's own Redis with a site). |
 | **Multi-server** | Admin → Servers | Add servers to host accounts on. The panel shows a one-line join command for a fresh Ubuntu 24.04 server; it connects over WireGuard (UDP 51888), and its agent takes jobs from its own queue. Pick the server when creating an account. Mail, webmail and the web terminal stay on the main server. |
 
 **Email deliverability:** many VPS providers block outgoing port 25 until you ask them to open it. Set the server's reverse DNS (PTR) to the panel hostname, and create the DNS records shown on the Email page.

@@ -101,6 +101,8 @@ export const sites = pgTable(
     instances: integer("instances").notNull().default(1),
     healthPath: text("health_path").notNull().default("/"),
     background: boolean("background").notNull().default(false),
+    processes: jsonb("processes").$type<{ name: string; command: string; path: string | null }[]>().notNull().default([]),
+    redis: boolean("redis").notNull().default(false),
     status: statusEnum("status").notNull().default("pending"),
     running: boolean("running").notNull().default(false),
     currentRelease: text("current_release"),

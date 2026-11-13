@@ -8,7 +8,7 @@ import { paths, type DeployResult, type JobPayloads, type SiteSpec } from "@host
 import { env, sys } from "../env.js";
 import { run, runAsUser } from "../exec.js";
 import { exists, readLink, swapSymlink, writeFileAtomic } from "../fsx.js";
-import { appDir, decryptEnv, reloadPhp, runtimePath, serviceUnits, writeEnvFile, writePhpPool } from "../runtime.js";
+import { appDir, decryptEnv, processUnitName, reloadPhp, runtimePath, serviceUnits, writeEnvFile, writePhpPool } from "../runtime.js";
 import { PLACEHOLDER } from "./sites.js";
 
 /** Folders that survive deploys: if shared/<path> exists it is symlinked into every release. */
@@ -224,6 +224,26 @@ export async function restartApp(site: SiteSpec, log: { stream: Writable; line: 
 }
 
 export async function healthCheck(site: SiteSpec, log: DeployLog): Promise<boolean> {
+  if (!(await mainHealthCheck(site, log))) return false;
+  if (!site.processes?.length || env.dryRun) return true;
+  // Extra processes (API, worker…): healthy if they are still running a few seconds after the restart.
+  await new Promise((r) => setTimeout(r, 5000));
+  const units = site.processes.map((p) => processUnitName(site, p.name));
+  const res = await run("systemctl", ["is-active", ...units], { allowFail: true });
+  const states = res.stdout.trim().split("\n");
+  site.processes.forEach((p, i) => log.line(`Process ${p.name}: ${states[i] ?? "unknown"}`));
+  if (res.code !== 0) {
+    const bad = site.processes.find((_, i) => states[i] !== "active");
+    if (bad) {
+      const tail = await run("tail", ["-n", "30", `/home/${site.linuxUser}/sites/${site.name}/logs/${bad.name}.log`], { allowFail: true });
+      if (tail.stdout.trim()) log.stream.write(`${bad.name}.log:\n${tail.stdout.trimEnd()}\n`);
+    }
+    return false;
+  }
+  return true;
+}
+
+async function mainHealthCheck(site: SiteSpec, log: DeployLog): Promise<boolean> {
   if (site.runtime === "php" || site.runtime === "static") {
     const doc = [appDir(site), site.publicDir].filter(Boolean).join("/");
     const ok = await exists(doc);
@@ -237,7 +257,7 @@ export async function healthCheck(site: SiteSpec, log: DeployLog): Promise<boole
   if (site.background) {
     // Workers have no HTTP endpoint: healthy if every unit is still running after 10 seconds.
     await new Promise((r) => setTimeout(r, 10_000));
-    const res = await run("systemctl", ["is-active", ...serviceUnits(site)], { allowFail: true });
+    const res = await run("systemctl", ["is-active", ...serviceUnits(site).slice(0, site.instances)], { allowFail: true });
     log.line(`Worker units: ${res.stdout.trim().replace(/\n/g, ", ")}`);
     return res.code === 0;
   }

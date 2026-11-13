@@ -128,6 +128,10 @@ function Overview({ data }: { data: SiteResponse }) {
     ["GitHub", s.git ? `${s.git.repoFullName} @ ${s.git.branch}` : "—"],
     ["Release", s.currentRelease ?? t("sites.neverDeployed")],
     ...(s.port ? ([["Internal port", `127.0.0.1:${s.port}${s.instances > 1 ? `–${s.port + s.instances - 1}` : ""}`]] as [string, string][]) : []),
+    ...(s.port !== null
+      ? (s.processes ?? []).map((p, i) => [`Process ${p.name}`, `127.0.0.1:${s.port! + s.instances + i}${p.path ? ` ← ${p.path}` : ""}`] as [string, string])
+      : []),
+    ...(s.redis ? ([["Redis", "private, REDIS_URL is set"]] as [string, string][]) : []),
     ["Folder", s.paths ? <CopyText text={s.paths.home} /> : "—"],
     [t("sites.buildCmd"), s.buildCmd ? <code className="text-xs">{s.buildCmd}</code> : "—"],
     ...(s.startCmd ? ([[t("sites.startCmd"), <code className="text-xs">{s.startCmd}</code>]] as [string, React.ReactNode][]) : []),
@@ -414,10 +418,16 @@ function SettingsTab({ site }: { site: Site }) {
     startCmd: site.startCmd,
     instances: site.instances,
     healthPath: site.healthPath,
+    processes: site.processes ?? [],
+    redis: site.redis ?? false,
   });
   const rt = info.data?.runtimes.find((r) => r.id === form.runtime);
   const save = useMutation({
-    mutationFn: () => patch(`/sites/${site.id}`, form),
+    mutationFn: () =>
+      patch(`/sites/${site.id}`, {
+        ...form,
+        processes: form.processes.map((p) => ({ ...p, path: p.path?.trim() ? p.path.trim() : null })),
+      }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["site", site.id] }),
   });
   const remove = useMutation({
@@ -486,6 +496,47 @@ function SettingsTab({ site }: { site: Site }) {
         </div>
         <ErrorText error={save.error} />
       </Card>
+      {(form.runtime === "node" || form.runtime === "python") && (
+        <Card title={t("sites.processes.title")}>
+          <p className="mb-4 text-sm text-slate-600">{t("sites.processes.help")}</p>
+          <div className="space-y-3">
+            {form.processes.map((p, i) => {
+              const upd = (patchP: Partial<typeof p>) => set("processes", form.processes.map((x, j) => (j === i ? { ...x, ...patchP } : x)));
+              return (
+                <div key={i} className="grid gap-2 rounded-lg border border-slate-200 p-3 sm:grid-cols-[8rem_1fr_9rem_auto]">
+                  <Input placeholder="api" value={p.name} onChange={(e) => upd({ name: e.target.value.toLowerCase() })} />
+                  <Input placeholder="cd apps/api && node dist/server.js" value={p.command} onChange={(e) => upd({ command: e.target.value })} className="font-mono" />
+                  <Input placeholder={t("sites.processes.pathPlaceholder")} value={p.path ?? ""} onChange={(e) => upd({ path: e.target.value })} />
+                  <Button variant="ghost" className="text-red-600" onClick={() => set("processes", form.processes.filter((_, j) => j !== i))}>
+                    ✕
+                  </Button>
+                  <p className="text-xs text-slate-500 sm:col-span-4">
+                    {p.name ? <code>PORT_{p.name.toUpperCase().replace(/-/g, "_")}</code> : null} {p.path ? t("sites.processes.routed", { path: p.path }) : t("sites.processes.background")}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+          {form.processes.length < 6 && (
+            <Button variant="secondary" className="mt-3" onClick={() => set("processes", [...form.processes, { name: "", command: "", path: null }])}>
+              + {t("sites.processes.add")}
+            </Button>
+          )}
+          <label className="mt-5 flex items-start gap-2 border-t border-slate-100 pt-4 text-sm">
+            <input type="checkbox" className="mt-0.5" checked={form.redis} onChange={(e) => set("redis", e.target.checked)} />
+            <span>
+              <span className="font-medium">{t("sites.processes.redis")}</span>
+              <span className="block text-xs text-slate-500">{t("sites.processes.redisHelp")}</span>
+            </span>
+          </label>
+          <div className="mt-4">
+            <Button busy={save.isPending} onClick={() => save.mutate()}>
+              {t("common.save")}
+            </Button>
+            <ErrorText error={save.error} />
+          </div>
+        </Card>
+      )}
       <Card title="Danger zone">
         <Button
           variant="danger"

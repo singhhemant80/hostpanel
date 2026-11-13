@@ -93,6 +93,8 @@ export interface Site {
   instances: number;
   healthPath: string;
   background: boolean;
+  processes: { name: string; command: string; path: string | null }[];
+  redis: boolean;
   status: string;
   running: boolean;
   currentRelease: string | null;

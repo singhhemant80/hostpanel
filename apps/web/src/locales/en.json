@@ -81,7 +81,17 @@
     "lastDeploy": "Last deploy",
     "neverDeployed": "Not deployed yet",
     "rollback": "Roll back",
-    "viewLog": "Log"
+    "viewLog": "Log",
+    "processes": {
+      "title": "Extra processes",
+      "help": "Run more programs from the same build, e.g. an API next to the web app, or a queue worker. Each gets its own port in $PORT (and PORT_<NAME> for the others). Give a path like /api/* to send that part of the site's domains to it; leave the path empty for background workers.",
+      "pathPlaceholder": "/api/* (optional)",
+      "routed": "gets requests for {{path}}",
+      "background": "background process, no web traffic",
+      "add": "Add process",
+      "redis": "Private Redis",
+      "redisHelp": "A Redis only this site can use (password-protected, 256 MB, data kept across deploys). REDIS_URL is set for the app, its processes and the build."
+    }
   },
   "github": {
     "repo": "Repository (owner/repo)",

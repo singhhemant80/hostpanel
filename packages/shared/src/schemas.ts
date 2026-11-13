@@ -71,6 +71,25 @@ export const createSiteSchema = z.object({
   healthPath: z.string().startsWith("/").max(255).default("/"),
   instances: z.number().int().min(1).max(8).default(1),
   background: z.boolean().default(false),
+  processes: z
+    .array(
+      z.object({
+        name: z
+          .string()
+          .regex(/^[a-z][a-z0-9-]{0,15}$/, "Process names: lowercase letters, digits and -, up to 16")
+          .refine((n) => n !== "redis", "\"redis\" is reserved: turn on the private Redis instead"),
+        command: z.string().trim().min(1).max(1000),
+        path: z
+          .string()
+          .regex(/^\/[A-Za-z0-9._\-\/]*\*?$/, "Use a path like /api/*")
+          .nullable()
+          .default(null),
+      }),
+    )
+    .max(6)
+    .refine((ps) => new Set(ps.map((p) => p.name)).size === ps.length, "Process names must be different")
+    .default([]),
+  redis: z.boolean().default(false),
 });
 
 export const updateSiteSchema = createSiteSchema

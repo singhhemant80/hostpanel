@@ -1,5 +1,5 @@
 import { eq, inArray, isNotNull } from "drizzle-orm";
-import { PORT_RANGE, paths, type RouteSpec, type Runtime, type SiteSpec } from "@hostpanel/shared";
+import { PORT_RANGE, paths, processPort, sitePortSlots, type RouteSpec, type Runtime, type SiteSpec } from "@hostpanel/shared";
 import { config } from "./config.js";
 import { db, schema } from "./db.js";
 import type { Account, Domain, Site, SiteEnv } from "./schema.js";
@@ -24,6 +24,8 @@ export function siteSpec(site: SiteWithAccount): SiteSpec {
     instances: site.instances,
     healthPath: site.healthPath,
     background: site.background,
+    processes: site.processes ?? [],
+    redis: site.redis ?? false,
     env: (site.env ?? []).map((e) => ({ key: e.key, valueEnc: e.valueEnc })),
   };
 }
@@ -61,8 +63,15 @@ export function routeFor(domain: Domain, site: SiteWithAccount, portsBySite?: Ma
     case "php":
       return { ...base, kind: "php", phpVersion: site.runtimeVersion, root: docRoot(site) };
     case "node":
-    case "python":
-      return { ...base, kind: "proxy", port: site.port ?? undefined, instances: site.instances };
+    case "python": {
+      // the site's own extra processes with a path (e.g. /api/* → its API process), after domain path rules
+      const own = (site.processes ?? [])
+        .map((p, i) => ({ path: p.path, port: processPort(site, i) }))
+        .filter((r): r is { path: string; port: number } => Boolean(r.path && r.port))
+        .map((r) => ({ ...r, instances: 1 }));
+      const all = [...(base.paths ?? []), ...own.filter((o) => !(base.paths ?? []).some((p) => p.path === o.path))];
+      return { ...base, ...(all.length ? { paths: all } : {}), kind: "proxy", port: site.port ?? undefined, instances: site.instances };
+    }
     default:
       return { ...base, kind: "static", root: docRoot(site) };
   }
@@ -110,19 +119,19 @@ export async function syncRoutes(createdBy?: string): Promise<string> {
 }
 
 /** Lowest free internal port block. Instance i of a Node/Python site listens on port + i. */
-export async function allocatePort(instances: number, excludeSiteId?: string): Promise<number> {
+export async function allocatePort(slots: number, excludeSiteId?: string): Promise<number> {
   const used = await db
-    .select({ id: schema.sites.id, port: schema.sites.port, instances: schema.sites.instances })
+    .select({ id: schema.sites.id, port: schema.sites.port, instances: schema.sites.instances, processes: schema.sites.processes, redis: schema.sites.redis })
     .from(schema.sites)
     .where(isNotNull(schema.sites.port));
   const taken = new Set<number>();
   for (const s of used) {
     if (s.id === excludeSiteId) continue;
-    for (let i = 0; i < s.instances; i++) taken.add(s.port! + i);
+    for (let i = 0; i < sitePortSlots(s); i++) taken.add(s.port! + i);
   }
-  for (let p = PORT_RANGE.min; p + instances - 1 <= PORT_RANGE.max; p++) {
+  for (let p = PORT_RANGE.min; p + slots - 1 <= PORT_RANGE.max; p++) {
     let free = true;
-    for (let i = 0; i < instances && free; i++) if (taken.has(p + i)) free = false;
+    for (let i = 0; i < slots && free; i++) if (taken.has(p + i)) free = false;
     if (free) return p;
   }
   throw new Error("No free ports left in the site port range");
@@ -130,9 +139,13 @@ export async function allocatePort(instances: number, excludeSiteId?: string): P
 
 
 /** systemd units that run a site's processes (Node/Python only). */
-export function serviceUnitNames(linuxUser: string, site: Pick<Site, "name" | "runtime" | "instances">): string[] {
+export function serviceUnitNames(linuxUser: string, site: Pick<Site, "name" | "runtime" | "instances" | "processes" | "redis">): string[] {
   if (site.runtime !== "node" && site.runtime !== "python") return [];
-  return Array.from({ length: site.instances }, (_, i) => `hp-${linuxUser}-${site.name}-${i}.service`);
+  return [
+    ...Array.from({ length: site.instances }, (_, i) => `hp-${linuxUser}-${site.name}-${i}.service`),
+    ...(site.processes ?? []).map((p) => `hp-${linuxUser}-${site.name}.${p.name}.service`),
+    ...(site.redis ? [`hp-${linuxUser}-${site.name}.redis.service`] : []),
+  ];
 }
 
 /** The server an account lives on (for DNS targets and main-only features). */

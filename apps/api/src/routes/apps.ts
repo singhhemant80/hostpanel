@@ -14,7 +14,7 @@ interface CatalogEntry {
   id: AppTemplate;
   name: string;
   description: string;
-  site: Omit<CreateSiteInput, "name" | "primaryDomain" | "accountId">;
+  site: Omit<CreateSiteInput, "name" | "primaryDomain" | "accountId" | "processes" | "redis">;
   database: "mariadb" | null;
   adminUser: boolean;
   minutes: string;

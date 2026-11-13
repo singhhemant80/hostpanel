@@ -1,7 +1,9 @@
-import { RUNTIME_VERSIONS, paths, type SiteSpec } from "@hostpanel/shared";
+import { createHmac } from "node:crypto";
+import { readdir } from "node:fs/promises";
+import { RUNTIME_VERSIONS, paths, processEnvName, processPort, redisPort, type SiteSpec } from "@hostpanel/shared";
 import { decrypt, env } from "./env.js";
 import { run } from "./exec.js";
-import { exists, removePath, writeFileAtomic } from "./fsx.js";
+import { ensureDir, exists, removePath, writeFileAtomic } from "./fsx.js";
 
 /** PATH a site's build and start commands see, with the chosen runtime version first. */
 export function runtimePath(site: SiteSpec): string {
@@ -19,10 +21,22 @@ export function runtimePath(site: SiteSpec): string {
   }
 }
 
+/** The site's env vars plus what the panel provides: PORT_<PROCESS> for each extra process and REDIS_URL. */
 export function decryptEnv(site: SiteSpec): Record<string, string> {
   const out: Record<string, string> = {};
   for (const v of site.env) out[v.key] = decrypt(v.valueEnc);
+  (site.processes ?? []).forEach((p, i) => {
+    const port = processPort(site, i);
+    if (port !== null) out[processEnvName(p.name)] = String(port);
+  });
+  const rp = site.redis ? redisPort(site) : null;
+  if (rp !== null) out.REDIS_URL = `redis://:${redisPassword(site)}@127.0.0.1:${rp}`;
   return out;
+}
+
+/** Stable per-site Redis password, derived from the panel's key (never stored). */
+export function redisPassword(site: SiteSpec): string {
+  return createHmac("sha256", env.encryptionKey).update(`redis:${site.id}`).digest("hex").slice(0, 40);
 }
 
 /** Folder the app runs from: current release + optional sub-folder (monorepos). */
@@ -35,6 +49,10 @@ export function appDir(site: SiteSpec, releaseDir?: string): string {
 
 export const unitName = (site: SiteSpec, i: number) => `hp-${site.linuxUser}-${site.name}-${i}.service`;
 export const unitFile = (site: SiteSpec, i: number) => `/etc/systemd/system/${unitName(site, i)}`;
+// "." never appears in user or site names, so these can't collide with another site's units
+export const processUnitName = (site: SiteSpec, name: string) => `hp-${site.linuxUser}-${site.name}.${name}.service`;
+export const redisUnitName = (site: SiteSpec) => `hp-${site.linuxUser}-${site.name}.redis.service`;
+const UNIT_DIR = "/etc/systemd/system";
 export const envFile = (site: SiteSpec) => `/etc/hostpanel/env/${site.linuxUser}-${site.name}.env`;
 
 function systemdEscapeEnv(v: string): string {
@@ -53,14 +71,9 @@ export async function writeEnvFile(site: SiteSpec): Promise<void> {
   await writeFileAtomic(envFile(site), lines.join("\n") + "\n", 0o600);
 }
 
-export async function writeServiceUnits(site: SiteSpec): Promise<string[]> {
-  if (site.port === null) throw new Error("Node/Python sites need a port");
-  const units: string[] = [];
-  const start = site.startCmd.trim() || (site.runtime === "node" ? "npm start" : "python app.py");
-  for (let i = 0; i < site.instances; i++) {
-    const port = site.port + i;
-    const unit = `[Unit]
-Description=HostPanel site ${site.name} (${site.linuxUser}) instance ${i}
+function unitText(site: SiteSpec, o: { description: string; port: number | null; command: string; logName: string; restartSec?: number }): string {
+  return `[Unit]
+Description=${o.description}
 After=network.target
 StartLimitIntervalSec=300
 StartLimitBurst=10
@@ -76,49 +89,112 @@ Environment=NODE_ENV=production
 Environment=PYTHONUNBUFFERED=1
 Environment=HOST=127.0.0.1
 EnvironmentFile=-${envFile(site)}
-${site.background ? "" : `Environment=PORT=${port}`}
-ExecStart=/bin/bash -c ${systemdQuote(start)}
+${o.port !== null ? `Environment=PORT=${o.port}` : ""}
+ExecStart=/bin/bash -c ${systemdQuote(o.command)}
 Restart=always
-RestartSec=3
+RestartSec=${o.restartSec ?? 3}
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=full
 ProtectHome=tmpfs
 BindPaths=/home/${site.linuxUser}
-StandardOutput=append:/home/${site.linuxUser}/sites/${site.name}/logs/app.log
-StandardError=append:/home/${site.linuxUser}/sites/${site.name}/logs/app.log
+StandardOutput=append:/home/${site.linuxUser}/sites/${site.name}/logs/${o.logName}
+StandardError=append:/home/${site.linuxUser}/sites/${site.name}/logs/${o.logName}
 
 [Install]
 WantedBy=multi-user.target
 `;
-    await writeFileAtomic(unitFile(site, i), unit, 0o644);
+}
+
+/** Units of this site currently on disk (main instances, extra processes, redis). */
+async function existingUnits(site: SiteSpec): Promise<string[]> {
+  const prefix = `hp-${site.linuxUser}-${site.name}`;
+  const names = await readdir(UNIT_DIR).catch(() => [] as string[]);
+  // "-<n>" (instances) or ".<process>" / ".redis" right after the prefix; site "web" never matches site "web-2"
+  return names.filter((n) => n.startsWith(prefix) && /^(-\d+|\.[a-z0-9-]+)\.service$/.test(n.slice(prefix.length)));
+}
+
+export async function writeServiceUnits(site: SiteSpec): Promise<string[]> {
+  if (site.port === null) throw new Error("Node/Python sites need a port");
+  const units: string[] = [];
+  const start = site.startCmd.trim() || (site.runtime === "node" ? "npm start" : "python app.py");
+  for (let i = 0; i < site.instances; i++) {
+    const text = unitText(site, {
+      description: `HostPanel site ${site.name} (${site.linuxUser}) instance ${i}`,
+      port: site.background ? null : site.port + i,
+      command: start,
+      logName: "app.log",
+    });
+    await writeFileAtomic(unitFile(site, i), text, 0o644);
     units.push(unitName(site, i));
   }
-  // remove units for instances that no longer exist (instance count lowered)
-  for (let i = site.instances; i < 8; i++) {
-    if (await exists(unitFile(site, i))) {
-      await run("systemctl", ["disable", "--now", unitName(site, i)], { allowFail: true });
-      await removePath(unitFile(site, i));
-    }
+  for (const [i, p] of (site.processes ?? []).entries()) {
+    const text = unitText(site, {
+      description: `HostPanel site ${site.name} (${site.linuxUser}) process ${p.name}`,
+      port: processPort(site, i),
+      command: p.command,
+      logName: `${p.name}.log`,
+    });
+    await writeFileAtomic(`${UNIT_DIR}/${processUnitName(site, p.name)}`, text, 0o644);
+    units.push(processUnitName(site, p.name));
+  }
+  const all = [...units];
+  if (site.redis) {
+    await writeRedisUnit(site);
+    all.push(redisUnitName(site));
+  }
+  // remove units that no longer exist (fewer instances, a process removed, redis turned off)
+  for (const old of await existingUnits(site)) {
+    if (all.includes(old)) continue;
+    await run("systemctl", ["disable", "--now", old], { allowFail: true });
+    await removePath(`${UNIT_DIR}/${old}`);
   }
   await run("systemctl", ["daemon-reload"]);
-  await run("systemctl", ["enable", ...units]);
+  await run("systemctl", ["enable", ...all]);
+  if (site.redis) await run("systemctl", ["start", redisUnitName(site)], { allowFail: true });
   return units;
 }
 
+/** Private Redis: own port, password, data in shared/redis (kept across deploys), BullMQ-safe settings. */
+async function writeRedisUnit(site: SiteSpec): Promise<void> {
+  const dir = `${paths.shared(site.linuxUser, site.name)}/redis`;
+  await ensureDir(dir, 0o700);
+  const conf = [
+    `port ${redisPort(site)}`,
+    "bind 127.0.0.1",
+    "protected-mode yes",
+    `requirepass ${redisPassword(site)}`,
+    `dir ${dir}`,
+    "appendonly yes",
+    "save 300 1",
+    "maxmemory 256mb",
+    "maxmemory-policy noeviction",
+    "daemonize no",
+    "",
+  ].join("\n");
+  await writeFileAtomic(`${dir}/redis.conf`, conf, 0o600);
+  await run("chown", ["-R", `${site.linuxUser}:${site.linuxUser}`, dir]);
+  const text = unitText(site, {
+    description: `HostPanel site ${site.name} (${site.linuxUser}) private Redis`,
+    port: null,
+    command: `exec /usr/bin/redis-server ${dir}/redis.conf`,
+    logName: "redis.log",
+  }).replace(/^Environment=PATH=.*\n/m, "");
+  await writeFileAtomic(`${UNIT_DIR}/${redisUnitName(site)}`, text, 0o644);
+}
+
 export async function removeServiceUnits(site: SiteSpec): Promise<void> {
-  for (let i = 0; i < 8; i++) {
-    if (await exists(unitFile(site, i))) {
-      await run("systemctl", ["disable", "--now", unitName(site, i)], { allowFail: true });
-      await removePath(unitFile(site, i));
-    }
+  for (const u of await existingUnits(site)) {
+    await run("systemctl", ["disable", "--now", u], { allowFail: true });
+    await removePath(`${UNIT_DIR}/${u}`);
   }
   await removePath(envFile(site));
   await run("systemctl", ["daemon-reload"]);
 }
 
+/** Units restarted on deploy and by start/stop/restart (Redis is left running across deploys). */
 export function serviceUnits(site: SiteSpec): string[] {
-  return Array.from({ length: site.instances }, (_, i) => unitName(site, i));
+  return [...Array.from({ length: site.instances }, (_, i) => unitName(site, i)), ...(site.processes ?? []).map((p) => processUnitName(site, p.name))];
 }
 
 // ---------- PHP-FPM ----------

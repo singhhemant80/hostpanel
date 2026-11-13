@@ -10,6 +10,7 @@ import {
   detectRuntime,
   envVarsSchema,
   needsPort,
+  sitePortSlots,
   paths,
   updateSiteSchema,
   type CreateSiteInput,
@@ -79,13 +80,16 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
     if (!RUNTIME_VERSIONS[runtime].includes(version)) throw badRequest(`Unsupported ${runtime} version ${version}`);
 
     const instances = needsPort(runtime) ? (input.instances ?? site.instances) : 1;
+    const processes = needsPort(runtime) ? (input.processes ?? site.processes) : [];
+    const redis = needsPort(runtime) ? (input.redis ?? site.redis) : false;
+    const slots = sitePortSlots({ instances, processes, redis });
     let port = site.port;
     if (!needsPort(runtime)) port = null;
-    else if (port === null || instances > site.instances) port = await allocatePort(instances, site.id);
+    else if (port === null || slots > sitePortSlots(site)) port = await allocatePort(slots, site.id);
 
     const [updated] = await db
       .update(schema.sites)
-      .set({ ...input, runtime, runtimeVersion: version, instances, port, background: (input.background ?? site.background) && needsPort(runtime) })
+      .set({ ...input, runtime, runtimeVersion: version, instances, processes, redis, port, background: (input.background ?? site.background) && needsPort(runtime) })
       .where(eq(schema.sites.id, site.id))
       .returning();
     // Re-provision writes the new runtime config (php-fpm pool / systemd units). Build changes need a deploy.
@@ -297,7 +301,9 @@ export async function createSiteRecord(
   }
 
   const d = RUNTIME_DEFAULTS[input.runtime as Runtime];
-  const port = needsPort(input.runtime) ? await allocatePort(input.instances) : null;
+  const processes = needsPort(input.runtime) ? (input.processes ?? []) : [];
+  const redis = needsPort(input.runtime) ? (input.redis ?? false) : false;
+  const port = needsPort(input.runtime) ? await allocatePort(sitePortSlots({ instances: input.instances, processes, redis })) : null;
   const site = await db.transaction(async (tx) => {
     const [s] = await tx
       .insert(schema.sites)
@@ -312,6 +318,8 @@ export async function createSiteRecord(
         startCmd: input.startCmd ?? d.startCmd,
         healthPath: input.healthPath,
         instances: needsPort(input.runtime) ? input.instances : 1,
+        processes,
+        redis,
         port,
         background,
       })

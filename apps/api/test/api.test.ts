@@ -51,3 +51,18 @@ test("mail DNS records: MX, SPF, DKIM, DMARC", async () => {
   assert.ok(recs.some((r) => r.name === "_dmarc.shop.in"));
   assert.equal(mailDnsRecords("shop.in", null).length, 3);
 });
+
+test("routes: a site's extra process with a path gets that path on the site's domains", async () => {
+  const { routeFor, serviceUnitNames } = await import("../src/specs.js");
+  const site = {
+    id: "s1", name: "crapplet", runtime: "node", runtimeVersion: "22", rootDir: "", publicDir: "", port: 20010, instances: 1, background: false, status: "active",
+    processes: [{ name: "api", command: "x", path: "/api/*" }, { name: "worker", command: "y", path: null }], redis: true,
+    account: { linuxUser: "hp_acme" },
+  } as never;
+  const domain = { hostname: "acme.in", type: "primary", pathRules: [], certEnc: null, keyEnc: null } as never;
+  const r = routeFor(domain, site);
+  assert.equal(r.kind, "proxy");
+  assert.equal(r.port, 20010);
+  assert.deepEqual(r.paths, [{ path: "/api/*", port: 20011, instances: 1 }]);
+  assert.deepEqual(serviceUnitNames("hp_acme", site), ["hp-hp_acme-crapplet-0.service", "hp-hp_acme-crapplet.api.service", "hp-hp_acme-crapplet.worker.service", "hp-hp_acme-crapplet.redis.service"]);
+});
