@@ -50,15 +50,25 @@ export const packages = pgTable("packages", {
   maxDatabases: integer("max_databases").notNull(),
   cpuPercent: integer("cpu_percent").notNull(),
   ramMb: integer("ram_mb").notNull(),
+  maxMailboxes: integer("max_mailboxes").notNull().default(10),
   createdAt: createdAt(),
 });
 
 export const servers = pgTable("servers", {
   id: id(),
+  name: text("name").notNull().default("Main server"),
   hostname: text("hostname").notNull().unique(),
   ipv4: text("ipv4"),
   ipv6: text("ipv6"),
   status: statusEnum("status").notNull().default("active"),
+  /** The server the panel runs on: it keeps the plain queue names and runs mail + the web terminal. */
+  isMain: boolean("is_main").notNull().default(false),
+  /** "" for the main server, "-<id>" for joined servers (BullMQ queue names). */
+  queueSuffix: text("queue_suffix").notNull().default(""),
+  wgPublicKey: text("wg_public_key"),
+  wgAddress: text("wg_address"),
+  joinTokenHash: text("join_token_hash"),
+  joinExpiresAt: timestamp("join_expires_at", { withTimezone: true }),
   createdAt: createdAt(),
 });
 
@@ -68,6 +78,8 @@ export const accounts = pgTable("accounts", {
   packageId: text("package_id").notNull().references(() => packages.id),
   serverId: text("server_id").notNull().references(() => servers.id),
   username: text("username").notNull().unique(),
+  /** Reseller who owns this customer account (null = created by an admin). */
+  resellerId: text("reseller_id").references(() => users.id, { onDelete: "set null" }),
   linuxUser: text("linux_user").notNull().unique(),
   status: statusEnum("status").notNull().default("pending"),
   createdAt: createdAt(),
@@ -264,12 +276,52 @@ export const accountAccess = pgTable("account_access", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 
+/** Limits for users with role "reseller". */
+export const resellerLimits = pgTable("reseller_limits", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  maxAccounts: integer("max_accounts").notNull(),
+  maxDiskMb: integer("max_disk_mb").notNull(),
+  packageIds: jsonb("package_ids").$type<string[]>().notNull().default([]),
+});
+
+export const mailDomains = pgTable("mail_domains", {
+  id: id(),
+  accountId: text("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
+  name: text("name").notNull().unique(),
+  catchAll: text("catch_all"),
+  dkimRecord: text("dkim_record"),
+  createdAt: createdAt(),
+});
+
+export const mailboxes = pgTable("mailboxes", {
+  id: id(),
+  domainId: text("domain_id").notNull().references(() => mailDomains.id, { onDelete: "cascade" }),
+  address: text("address").notNull().unique(),
+  passwordHash: text("password_hash").notNull(), // bcrypt
+  quotaMb: integer("quota_mb").notNull().default(1024),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: createdAt(),
+});
+
+export const mailAliases = pgTable("mail_aliases", {
+  id: id(),
+  domainId: text("domain_id").notNull().references(() => mailDomains.id, { onDelete: "cascade" }),
+  source: text("source").notNull().unique(),
+  destinations: jsonb("destinations").$type<string[]>().notNull(),
+  createdAt: createdAt(),
+});
+
 // ---- relations (for db.query.*.findMany({ with: ... })) ----
-export const usersRelations = relations(users, ({ many }) => ({ accounts: many(accounts), sessions: many(sessions) }));
+export const usersRelations = relations(users, ({ many, one }) => ({
+  accounts: many(accounts, { relationName: "owner" }),
+  resoldAccounts: many(accounts, { relationName: "reseller" }),
+  sessions: many(sessions),
+  resellerLimits: one(resellerLimits, { fields: [users.id], references: [resellerLimits.userId] }),
+}));
 export const sessionsRelations = relations(sessions, ({ one }) => ({ user: one(users, { fields: [sessions.userId], references: [users.id] }) }));
 export const packagesRelations = relations(packages, ({ many }) => ({ accounts: many(accounts) }));
 export const accountsRelations = relations(accounts, ({ one, many }) => ({
-  user: one(users, { fields: [accounts.userId], references: [users.id] }),
+  user: one(users, { fields: [accounts.userId], references: [users.id], relationName: "owner" }),
   package: one(packages, { fields: [accounts.packageId], references: [packages.id] }),
   server: one(servers, { fields: [accounts.serverId], references: [servers.id] }),
   sites: many(sites),
@@ -278,7 +330,18 @@ export const accountsRelations = relations(accounts, ({ one, many }) => ({
   backups: many(backups),
   dnsZones: many(dnsZones),
   access: one(accountAccess, { fields: [accounts.id], references: [accountAccess.accountId] }),
+  mailDomains: many(mailDomains),
+  reseller: one(users, { fields: [accounts.resellerId], references: [users.id], relationName: "reseller" }),
 }));
+export const mailDomainsRelations = relations(mailDomains, ({ one, many }) => ({
+  account: one(accounts, { fields: [mailDomains.accountId], references: [accounts.id] }),
+  mailboxes: many(mailboxes),
+  aliases: many(mailAliases),
+}));
+export const mailboxesRelations = relations(mailboxes, ({ one }) => ({ domain: one(mailDomains, { fields: [mailboxes.domainId], references: [mailDomains.id] }) }));
+export const mailAliasesRelations = relations(mailAliases, ({ one }) => ({ domain: one(mailDomains, { fields: [mailAliases.domainId], references: [mailDomains.id] }) }));
+export const resellerLimitsRelations = relations(resellerLimits, ({ one }) => ({ user: one(users, { fields: [resellerLimits.userId], references: [users.id] }) }));
+export const serversRelations = relations(servers, ({ many }) => ({ accounts: many(accounts) }));
 export const sitesRelations = relations(sites, ({ one, many }) => ({
   account: one(accounts, { fields: [sites.accountId], references: [accounts.id] }),
   domains: many(domains),
@@ -314,3 +377,5 @@ export type JobRow = typeof jobs.$inferSelect;
 export type CronJob = typeof cronJobs.$inferSelect;
 export type Backup = typeof backups.$inferSelect;
 export type DnsZone = typeof dnsZones.$inferSelect;
+export type Server = typeof servers.$inferSelect;
+export type MailDomain = typeof mailDomains.$inferSelect;

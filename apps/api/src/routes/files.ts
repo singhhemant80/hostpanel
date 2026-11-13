@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, rm, stat } from "node:fs/promises";
+import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { z } from "zod";
@@ -11,8 +11,11 @@ import { badRequest, notFound } from "../errors.js";
 import { audit, requireAuth } from "../auth.js";
 import { ownedAccount } from "../access.js";
 import { runFast } from "../queue.js";
+import { serverOf } from "../specs.js";
 
 const MAX_UPLOAD = 512 * 1024 * 1024;
+/** Accounts on servers other than the main one: files travel inside jobs, so keep them small. */
+const REMOTE_MAX = 25 * 1024 * 1024;
 const local = (p: string) => config.devSandboxRoot + p;
 
 /**
@@ -85,6 +88,19 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     const a = await acc(req);
     const path = p((req.query as { path?: string }).path);
     if (!path) throw badRequest("Missing ?path=");
+    if (!(await serverOf(a.serverId)).isMain) {
+      // other servers: no shared staging folder, so the file travels inside the job (max 25 MB)
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const c of req.body as AsyncIterable<Buffer>) {
+        size += c.length;
+        if (size > REMOTE_MAX) throw badRequest("Files over 25 MB on this server: upload them with SFTP");
+        chunks.push(c);
+      }
+      const r = await runFast("fs.write", { linuxUser: a.linuxUser, path, contentB64: Buffer.concat(chunks).toString("base64") }, 300_000);
+      await audit(req, "files.upload", "account", a.id, { path });
+      return r;
+    }
     const staged = randomToken(24);
     await mkdir(local(paths.uploads), { recursive: true });
     const file = join(local(paths.uploads), staged);
@@ -103,6 +119,12 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     const a = await acc(req);
     const path = p(((req.body ?? {}) as { path?: string }).path);
     const token = randomToken(24);
+    if (!(await serverOf(a.serverId)).isMain) {
+      const r = (await runFast("fs.read", { linuxUser: a.linuxUser, path, maxBytes: REMOTE_MAX }, 300_000)) as { contentB64: string; size: number };
+      await mkdir(local(paths.downloads), { recursive: true });
+      await writeFile(join(local(paths.downloads), token), Buffer.from(r.contentB64, "base64"), { mode: 0o640 });
+      return { token, name: path.split("/").pop(), size: r.size };
+    }
     const r = (await runFast("fs.download", { linuxUser: a.linuxUser, path, token }, 600_000)) as { name: string; size: number };
     return { token, ...r };
   });

@@ -38,13 +38,27 @@ export const JOB_TYPES = [
   "fs.compress",
   "logs.read",
   "stats.account",
+  // phase 3
+  "mail.sync",
+  "mail.dkim",
+  "mail.purge",
+  "mail.usage",
+  "app.install",
+  "server.addPeer",
+  "server.removePeer",
 ] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 export const AGENT_QUEUE = "hostpanel-agent";
 /** Short interactive jobs (file manager, logs, usage) so they never wait behind a long build. */
 export const FAST_QUEUE = "hostpanel-agent-fast";
-export const FAST_JOB_PREFIXES = ["fs.", "logs.", "stats.", "cron.run"];
+export const FAST_JOB_PREFIXES = ["fs.", "logs.", "stats.", "cron.run", "mail.usage", "mail.dkim"];
+/** Queue names for a server: the main server keeps the plain names, others get "-<serverId>". */
+export function queueNames(serverSuffix: string): { jobs: string; fast: string } {
+  return { jobs: `${AGENT_QUEUE}${serverSuffix}`, fast: `${FAST_QUEUE}${serverSuffix}` };
+}
+export const heartbeatKey = (serverSuffix: string) => `hp:heartbeat${serverSuffix || "-main"}`;
+
 export function isFastJob(type: string): boolean {
   return FAST_JOB_PREFIXES.some((p) => type.startsWith(p));
 }
@@ -185,7 +199,8 @@ export interface JobPayloads {
     sshKeys: string[];
   };
   "fs.list": { linuxUser: string; path: string };
-  "fs.read": { linuxUser: string; path: string };
+  /** maxBytes: up to 25 MB for downloads from servers other than the main one (default 2 MB for the editor). */
+  "fs.read": { linuxUser: string; path: string; maxBytes?: number };
   "fs.write": { linuxUser: string; path: string; contentB64: string };
   "fs.mkdir": { linuxUser: string; path: string };
   "fs.rename": { linuxUser: string; from: string; to: string };
@@ -199,7 +214,47 @@ export interface JobPayloads {
   "fs.compress": { linuxUser: string; paths: string[]; to: string };
   "logs.read": { linuxUser: string; siteName: string; log: "access" | "app" | "php-error" | "cron"; bytes: number };
   "stats.account": { linuxUser: string; units: string[] };
+  /** Full desired mail state of the server (idempotent, like routes.sync). */
+  "mail.sync": { domains: MailDomainSpec[]; mailboxes: MailboxSpec[]; aliases: MailAliasSpec[]; mailHost: string };
+  /** Create (if missing) the DKIM key for a domain and return its public DNS record. */
+  "mail.dkim": { domain: string; selector: string };
+  /** Delete a mailbox's stored mail (after it was removed from mail.sync). */
+  "mail.purge": { address: string };
+  "mail.usage": { addresses: string[] };
+  "app.install": {
+    site: SiteSpec;
+    template: AppTemplate;
+    domain: string;
+    deploymentId: string;
+    db: { engine: "mariadb" | "postgres"; name: string; user: string; passwordEnc: string } | null;
+    admin: { user: string; email: string; passwordEnc: string } | null;
+  };
+  /** Main server: allow a new server into the private WireGuard network. */
+  "server.addPeer": { publicKey: string; address: string };
+  "server.removePeer": { publicKey: string };
 }
+
+// ---------------- email ----------------
+export interface MailDomainSpec {
+  name: string;
+  /** Address (or comma list) that receives mail for unknown local parts, or null. */
+  catchAll: string | null;
+}
+export interface MailboxSpec {
+  address: string;
+  /** bcrypt hash ({BLF-CRYPT} for Dovecot); the plain password never leaves the API. */
+  passwordHash: string;
+  quotaMb: number;
+  enabled: boolean;
+}
+export interface MailAliasSpec {
+  source: string;
+  destinations: string[];
+}
+
+// ---------------- one-click apps ----------------
+export const APP_TEMPLATES = ["wordpress", "laravel", "nextjs", "django"] as const;
+export type AppTemplate = (typeof APP_TEMPLATES)[number];
 
 export interface AccountUsage {
   diskBytes: number | null;

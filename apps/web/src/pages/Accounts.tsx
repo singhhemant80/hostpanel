@@ -2,21 +2,34 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { api, del, post, type Account, type Package } from "../api";
+import { useAuth } from "../auth";
 import { Button, Card, Empty, ErrorText, Field, Input, Modal, Select, StatusBadge, Table, timeAgo } from "../components/ui";
 
 export function AccountsPage() {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const servers = useQuery({
+    queryKey: ["servers"],
+    queryFn: () => api<{ servers: { id: string; name: string; hostname: string; joined: boolean; isMain: boolean }[] }>("/servers"),
+    enabled: isAdmin,
+  });
+  const reseller = useQuery({
+    queryKey: ["reseller-me"],
+    queryFn: () => api<{ reseller: { limits: { maxAccounts: number; maxDiskMb: number } | null; usage: { accounts: number; diskMb: number } } | null }>("/reseller/me"),
+    enabled: user?.role === "reseller",
+  });
   const q = useQuery({ queryKey: ["accounts"], queryFn: () => api<{ accounts: Account[] }>("/accounts"), refetchInterval: 8000 });
   const pkgs = useQuery({ queryKey: ["packages"], queryFn: () => api<{ packages: Package[] }>("/packages") });
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", username: "", password: "", packageId: "", locale: "en" });
+  const [form, setForm] = useState({ name: "", email: "", username: "", password: "", packageId: "", locale: "en", serverId: "" });
 
   const create = useMutation({
-    mutationFn: () => post("/accounts", form),
+    mutationFn: () => post("/accounts", { ...form, serverId: form.serverId || undefined }),
     onSuccess: () => {
       setOpen(false);
-      setForm({ name: "", email: "", username: "", password: "", packageId: "", locale: "en" });
+      setForm({ name: "", email: "", username: "", password: "", packageId: "", locale: "en", serverId: "" });
       void qc.invalidateQueries({ queryKey: ["accounts"] });
     },
   });
@@ -33,6 +46,16 @@ export function AccountsPage() {
         <h1 className="text-xl font-semibold">{t("nav.accounts")}</h1>
         <Button onClick={() => setOpen(true)}>+ {t("accounts.new")}</Button>
       </div>
+      {reseller.data?.reseller?.limits && (
+        <p className="rounded-lg bg-indigo-50 px-3 py-2 text-sm text-indigo-800">
+          {t("resellers.myUsage", {
+            accounts: reseller.data.reseller.usage.accounts,
+            maxAccounts: reseller.data.reseller.limits.maxAccounts,
+            disk: Math.round(reseller.data.reseller.usage.diskMb / 1000),
+            maxDisk: Math.round(reseller.data.reseller.limits.maxDiskMb / 1000),
+          })}
+        </p>
+      )}
       <Card>
         {q.data?.accounts.length ? (
           <Table head={[t("accounts.username"), "Owner", t("accounts.package"), "Usage", t("common.status"), ""]}>
@@ -45,6 +68,10 @@ export function AccountsPage() {
                 <td className="px-5 py-3">
                   <p>{a.user.name}</p>
                   <p className="text-xs text-slate-500">{a.user.email}</p>
+                  {isAdmin && a.reseller && <p className="text-xs text-indigo-600">{t("resellers.via", { name: a.reseller.name })}</p>}
+                  {isAdmin && (servers.data?.servers.length ?? 0) > 1 && (
+                    <p className="text-xs text-slate-400">{servers.data?.servers.find((s) => s.id === a.serverId)?.name ?? ""}</p>
+                  )}
                 </td>
                 <td className="px-5 py-3">{a.package.name}</td>
                 <td className="px-5 py-3 text-xs text-slate-600">
@@ -107,6 +134,20 @@ export function AccountsPage() {
               ))}
             </Select>
           </Field>
+          {isAdmin && (servers.data?.servers.filter((s) => s.joined).length ?? 0) > 1 && (
+            <Field label={t("servers.server")}>
+              <Select value={form.serverId} onChange={(e) => set("serverId", e.target.value)}>
+                {servers.data?.servers
+                  .filter((s) => s.joined)
+                  .map((s) => (
+                    <option key={s.id} value={s.isMain ? "" : s.id}>
+                      {s.name || s.hostname}
+                      {s.isMain ? " (main)" : ""}
+                    </option>
+                  ))}
+              </Select>
+            </Field>
+          )}
           <Field label="Language">
             <Select value={form.locale} onChange={(e) => set("locale", e.target.value)}>
               <option value="en">English</option>

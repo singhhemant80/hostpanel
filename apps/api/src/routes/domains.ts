@@ -9,7 +9,7 @@ import { db, schema } from "../db.js";
 import { badRequest, conflict } from "../errors.js";
 import { accountFilter, audit, currentUser, requireAuth } from "../auth.js";
 import { ownedDomain, ownedSite } from "../access.js";
-import { syncRoutes } from "../specs.js";
+import { serverOf, syncRoutes } from "../specs.js";
 import { config } from "../config.js";
 
 export async function domainRoutes(app: FastifyInstance): Promise<void> {
@@ -149,12 +149,13 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
     if (domain.hostname.startsWith("*.")) {
       return { dnsOk: true, found: { a: [], aaaa: [] }, expected: { ipv4: config.serverIpv4 }, hint: "Wildcards: add an A record for * (any name) pointing to this server. The certificate is issued through the DNS provider." };
     }
+    const target = await serverOf(domain.account.serverId);
     const [a, aaaa] = await Promise.all([
       dns.resolve4(domain.hostname).catch(() => [] as string[]),
       dns.resolve6(domain.hostname).catch(() => [] as string[]),
     ]);
-    const v4ok = config.serverIpv4 ? a.includes(config.serverIpv4) : a.length > 0;
-    const v6ok = !config.serverIpv6 || aaaa.length === 0 || aaaa.includes(config.serverIpv6);
+    const v4ok = target.ipv4 ? a.includes(target.ipv4) : a.length > 0;
+    const v6ok = !target.ipv6 || aaaa.length === 0 || aaaa.includes(target.ipv6);
     const dnsOk = v4ok && v6ok;
     await db
       .update(schema.domains)
@@ -163,11 +164,11 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
     return {
       dnsOk,
       found: { a, aaaa },
-      expected: { ipv4: config.serverIpv4, ipv6: config.serverIpv6 },
+      expected: { ipv4: target.ipv4, ipv6: target.ipv6 },
       hint: dnsOk
         ? "DNS is correct. Caddy issues the certificate on the first HTTPS request (usually within a minute)."
-        : `Create an A record for ${domain.hostname} pointing to ${config.serverIpv4 ?? "this server's IP"}${
-            v6ok ? "" : ` and fix or remove the AAAA record (expected ${config.serverIpv6})`
+        : `Create an A record for ${domain.hostname} pointing to ${target.ipv4 ?? "this server's IP"}${
+            v6ok ? "" : ` and fix or remove the AAAA record (expected ${target.ipv6})`
           }.`,
     };
   });

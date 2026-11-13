@@ -43,6 +43,7 @@ export const packageSchema = z.object({
   maxDatabases: z.number().int().min(0),
   cpuPercent: z.number().int().min(10).max(6400),
   ramMb: z.number().int().min(128),
+  maxMailboxes: z.number().int().min(0).default(10),
 });
 
 export const createAccountSchema = z.object({
@@ -52,6 +53,8 @@ export const createAccountSchema = z.object({
   username: slugSchema,
   packageId: z.string().min(1),
   locale: z.enum(["en", "hi"]).default("en"),
+  /** Admins only: which server hosts the account (default: the main server). */
+  serverId: z.string().optional(),
 });
 
 export const createSiteSchema = z.object({
@@ -196,3 +199,49 @@ export type AccessInput = z.infer<typeof accessSchema>;
 export type BackupSettings = z.infer<typeof backupSettingsSchema>;
 export type DnsSettings = z.infer<typeof dnsSettingsSchema>;
 export type DnsRecordInput = z.infer<typeof dnsRecordSchema>;
+
+// ---------------- phase 3 ----------------
+export const emailSchema = z.string().trim().toLowerCase().max(254).regex(/^[a-z0-9._%+-]+@([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/, "Not a valid e-mail address");
+export const localPartSchema = z.string().trim().toLowerCase().min(1).max(64).regex(/^[a-z0-9]([a-z0-9._+-]*[a-z0-9])?$/, "Use letters, digits and . _ + -");
+
+export const mailDomainSchema = z.object({ name: hostnameSchema.refine((h) => !h.startsWith("*."), "No wildcards"), accountId: z.string().optional() });
+export const mailboxSchema = z.object({
+  domainId: z.string().min(1),
+  localPart: localPartSchema,
+  password: z.string().min(10).max(128),
+  quotaMb: z.number().int().min(50).max(1_000_000).default(1024),
+});
+export const updateMailboxSchema = z.object({
+  password: z.string().min(10).max(128).optional(),
+  quotaMb: z.number().int().min(50).max(1_000_000).optional(),
+  enabled: z.boolean().optional(),
+});
+export const mailAliasSchema = z.object({
+  domainId: z.string().min(1),
+  localPart: localPartSchema,
+  destinations: z.array(emailSchema).min(1).max(50),
+});
+export const catchAllSchema = z.object({ catchAll: emailSchema.nullable() });
+
+export const appInstallSchema = z.object({
+  accountId: z.string().optional(),
+  template: z.enum(["wordpress", "laravel", "nextjs", "django"]),
+  name: slugSchema,
+  domain: hostnameSchema,
+  siteTitle: z.string().min(1).max(100).default("My site"),
+  adminEmail: z.string().email().optional(),
+});
+
+export const resellerSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(1).max(100),
+  password: z.string().min(10),
+  maxAccounts: z.number().int().min(1).max(10_000),
+  maxDiskMb: z.number().int().min(100),
+  packageIds: z.array(z.string()).min(1),
+});
+
+export const serverSchema = z.object({
+  name: z.string().min(1).max(60),
+  hostname: hostnameSchema,
+});

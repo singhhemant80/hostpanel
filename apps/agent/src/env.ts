@@ -19,6 +19,8 @@ export const env = {
   /** Group the panel API runs as; deploy logs are readable by it. */
   panelGroup: process.env.PANEL_GROUP ?? "hostpanel",
   webUser: process.env.WEB_USER ?? "caddy",
+  /** "" on the main server, "-<serverId>" on servers that joined later (see install.sh --join). */
+  queueSuffix: process.env.QUEUE_SUFFIX ?? "",
 };
 
 if (!env.encryptionKey) throw new Error("APP_ENCRYPTION_KEY is required (same value as the API)");

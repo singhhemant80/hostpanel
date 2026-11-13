@@ -24,6 +24,10 @@ import { backupRoutes } from "./routes/backups.js";
 import { accessRoutes, attachTerminal } from "./routes/access.js";
 import { dnsRoutes } from "./routes/dns.js";
 import { observeRoutes } from "./routes/observe.js";
+import { mailRoutes } from "./routes/mail.js";
+import { appRoutes } from "./routes/apps.js";
+import { resellerRoutes } from "./routes/resellers.js";
+import { serverRoutes } from "./routes/servers.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -91,6 +95,10 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
       await api.register(accessRoutes);
       await api.register(dnsRoutes);
       await api.register(observeRoutes);
+      await api.register(mailRoutes);
+      await api.register(appRoutes);
+      await api.register(resellerRoutes);
+      await api.register(serverRoutes);
     },
     { prefix: "/api/v1" },
   );

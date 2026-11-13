@@ -39,7 +39,7 @@ export async function databaseRoutes(app: FastifyInstance): Promise<void> {
     const jobId = await enqueue(
       "db.create",
       { engine: input.engine, name: row!.name, user: row!.dbUser, passwordEnc },
-      { targetType: "database", targetId: row!.id, createdBy: currentUser(req).id, sensitive: true },
+      { targetType: "database", targetId: row!.id, createdBy: currentUser(req).id, sensitive: true, serverId: account.serverId },
     );
     await audit(req, "database.create", "database", row!.id, { name, engine: input.engine });
     return { database: { id: row!.id, name: row!.name, dbUser: row!.dbUser, engine: row!.engine, status: row!.status }, password, jobId };
@@ -68,7 +68,7 @@ export async function databaseRoutes(app: FastifyInstance): Promise<void> {
     const jobId = await enqueue(
       "db.delete",
       { engine: rec.engine as "mariadb" | "postgres", name: rec.name, user: rec.dbUser },
-      { targetType: "database", targetId: rec.id, createdBy: currentUser(req).id },
+      { targetType: "database", targetId: rec.id, createdBy: currentUser(req).id, serverId: rec.account.serverId },
     );
     await audit(req, "database.delete", "database", rec.id);
     return { jobId };

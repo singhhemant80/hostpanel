@@ -38,6 +38,9 @@ export const config = {
   webDist: process.env.WEB_DIST || null,
   provisioningApiKey: process.env.PROVISIONING_API_KEY || null,
   keepReleases: 5,
+  /** Main server's WireGuard public key and UDP port (written to .env by install.sh). */
+  wgPublicKey: process.env.WG_PUBLIC_KEY || null,
+  wgPort: parseInt(process.env.WG_PORT ?? "51888", 10),
   /** Development only: where a dry-run agent writes files (so the log viewer can read deploy logs). */
   devSandboxRoot: isProd ? "" : (process.env.AGENT_DRY_ROOT ?? ""),
 };

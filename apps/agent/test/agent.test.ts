@@ -113,3 +113,29 @@ test("terminal tokens: signed, short-lived, confined to the user's home", () => 
   const [body] = signTerminalToken(ok).split(".");
   assert.equal(verifyTerminalToken(`${body}.forged`), null);
 });
+
+test("phase 3 payload validation: mail, apps, servers", () => {
+  const hash = "$2b$10$" + "a".repeat(53);
+  const good = { mailHost: "panel.acme.in", domains: [{ name: "acme.in", catchAll: null }], mailboxes: [{ address: "me@acme.in", passwordHash: hash, quotaMb: 1024, enabled: true }], aliases: [{ source: "info@acme.in", destinations: ["me@acme.in"] }] };
+  assert.ok(parsePayload("mail.sync", good));
+  // a newline or colon in a mailbox line would add a user to the Dovecot passwd file
+  assert.throws(() => parsePayload("mail.sync", { ...good, mailboxes: [{ ...good.mailboxes[0], address: "me@acme.in\nroot" }] }));
+  assert.throws(() => parsePayload("mail.sync", { ...good, mailboxes: [{ ...good.mailboxes[0], passwordHash: "x:0:0" }] }));
+  assert.throws(() => parsePayload("mail.sync", { ...good, aliases: [{ source: "a@acme.in", destinations: ["b@acme.in c@evil.in"] }] }));
+  assert.throws(() => parsePayload("mail.purge", { address: "../../etc@acme.in" }));
+  assert.throws(() => parsePayload("app.install", { site, template: "joomla", domain: "acme.in", deploymentId: "d1", db: null, admin: null }));
+  assert.ok(parsePayload("app.install", { site, template: "nextjs", domain: "acme.in", deploymentId: "d1", db: null, admin: null }));
+  const key = "A".repeat(43) + "=";
+  assert.ok(parsePayload("server.addPeer", { publicKey: key, address: "10.88.0.2" }));
+  assert.throws(() => parsePayload("server.addPeer", { publicKey: key + "\nAllowedIPs=0.0.0.0/0", address: "10.88.0.2" }));
+  assert.throws(() => parsePayload("server.addPeer", { publicKey: key, address: "0.0.0.0/0" }));
+});
+
+test("Caddyfile: webmail is served under the panel hostname only when installed", () => {
+  const without = buildCaddyfile([], "panel.acme.in", null);
+  assert.ok(!without.includes("/webmail"));
+  const withWm = buildCaddyfile([], "panel.acme.in", null, null, true);
+  assert.match(withWm, /handle \/webmail\/\*/);
+  assert.match(withWm, /hostpanel-webmail\.sock/);
+  assert.ok(withWm.indexOf("/webmail/*") < withWm.indexOf("reverse_proxy 127.0.0.1:4100"));
+});

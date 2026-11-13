@@ -1,4 +1,6 @@
 import { createWriteStream, type WriteStream } from "node:fs";
+import { Writable } from "node:stream";
+import { redis } from "../redis.js";
 import { mkdir, readdir, rename, rm, symlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Job } from "bullmq";
@@ -17,8 +19,31 @@ function stamp(d = new Date()): string {
   return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}-${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}`;
 }
 
-class DeployLog {
-  constructor(public stream: WriteStream) {}
+/** Deploy log: written to /var/log/hostpanel/deploys/<id>.log AND mirrored to Redis, so the panel
+ *  can show it even when the build ran on another server. Kept in Redis for 14 days. */
+class TeeStream extends Writable {
+  constructor(
+    private file: WriteStream,
+    private key: string,
+  ) {
+    super();
+  }
+  override _write(chunk: Buffer | string, _enc: BufferEncoding, cb: (e?: Error | null) => void): void {
+    this.file.write(chunk);
+    redis()
+      .multi()
+      .append(this.key, typeof chunk === "string" ? chunk : chunk.toString("utf8"))
+      .expire(this.key, 14 * 86400)
+      .exec()
+      .then(() => cb(), () => cb()); // a Redis hiccup must never fail a deploy
+  }
+  override _final(cb: (e?: Error | null) => void): void {
+    this.file.end(() => cb());
+  }
+}
+
+export class DeployLog {
+  constructor(public stream: Writable) {}
   line(msg: string): void {
     this.stream.write(`[${new Date().toISOString().slice(11, 19)}] ${msg}\n`);
   }
@@ -27,12 +52,12 @@ class DeployLog {
   }
 }
 
-async function openLog(deploymentId: string): Promise<DeployLog> {
+export async function openLog(deploymentId: string): Promise<DeployLog> {
   const file = sys(paths.deployLog(deploymentId));
   await mkdir(dirname(file), { recursive: true, mode: 0o750 });
-  const stream = createWriteStream(file, { flags: "a", mode: 0o640 });
+  const fileStream = createWriteStream(file, { flags: "a", mode: 0o640 });
   await run("chgrp", [env.panelGroup, file], { allowFail: true });
-  return new DeployLog(stream);
+  return new DeployLog(new TeeStream(fileStream, `hp:deploylog:${deploymentId}`));
 }
 
 export async function siteDeploy(p: JobPayloads["site.deploy"], job: Job): Promise<DeployResult> {
@@ -172,7 +197,7 @@ export async function siteRollback(p: JobPayloads["site.rollback"], job: Job): P
   }
 }
 
-export async function restartApp(site: SiteSpec, log: { stream: WriteStream; line: (m: string) => void }): Promise<void> {
+export async function restartApp(site: SiteSpec, log: { stream: Writable; line: (m: string) => void }): Promise<void> {
   if (site.runtime === "node" || site.runtime === "python") {
     await writeEnvFile(site);
     // Rolling restart: one instance at a time so multi-instance sites never drop traffic.
@@ -188,7 +213,7 @@ export async function restartApp(site: SiteSpec, log: { stream: WriteStream; lin
   }
 }
 
-async function healthCheck(site: SiteSpec, log: DeployLog): Promise<boolean> {
+export async function healthCheck(site: SiteSpec, log: DeployLog): Promise<boolean> {
   if (site.runtime === "php" || site.runtime === "static") {
     const doc = [appDir(site), site.publicDir].filter(Boolean).join("/");
     const ok = await exists(doc);

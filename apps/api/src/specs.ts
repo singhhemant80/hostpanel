@@ -69,7 +69,7 @@ export function routeFor(domain: Domain, site: SiteWithAccount, portsBySite?: Ma
 }
 
 /** Full desired routing table. The agent rebuilds Caddy's config from it every time (idempotent). */
-export async function buildRoutes(): Promise<RouteSpec[]> {
+export async function buildRoutes(serverId?: string): Promise<RouteSpec[]> {
   const rows = await db.query.domains.findMany({
     where: inArray(schema.domains.status, ["pending", "active"]),
     with: { site: { with: { account: true } } },
@@ -81,23 +81,32 @@ export async function buildRoutes(): Promise<RouteSpec[]> {
     .where(isNotNull(schema.sites.port));
   const portsBySite = new Map(ports.map((p) => [p.id, { port: p.port, instances: p.instances }]));
   return rows
+    .filter((d) => !serverId || d.site.account.serverId === serverId)
     .filter((d) => d.site.account.status === "active" && (d.site.status === "pending" || d.site.status === "active") && !d.site.background)
     .map((d) => routeFor(d, d.site, portsBySite));
 }
 
+/** Rebuild every server's Caddy config (each server only gets the domains of its own accounts). */
 export async function syncRoutes(createdBy?: string): Promise<string> {
-  const routes = await buildRoutes();
   const dns = await getSetting("dns");
-  return enqueue(
-    "routes.sync",
-    {
-      routes,
-      panelHostname: config.panelHostname,
-      acmeEmail: config.acmeEmail,
-      dnsTokenEnc: routes.some((r) => r.tls === "dns") && dns.provider === "cloudflare" ? dns.apiTokenEnc : null,
-    },
-    { dedupeKey: "routes.sync", targetType: "server", createdBy },
-  );
+  const servers = await db.query.servers.findMany({ where: inArray(schema.servers.status, ["active", "pending"]) });
+  let mainJob = "";
+  for (const server of servers) {
+    if (!server.isMain && !server.wgPublicKey) continue; // not joined yet
+    const routes = await buildRoutes(server.id);
+    const jobId = await enqueue(
+      "routes.sync",
+      {
+        routes,
+        panelHostname: server.isMain ? config.panelHostname : null,
+        acmeEmail: config.acmeEmail,
+        dnsTokenEnc: routes.some((r) => r.tls === "dns") && dns.provider === "cloudflare" ? dns.apiTokenEnc : null,
+      },
+      { dedupeKey: "routes.sync", targetType: "server", targetId: server.id, createdBy, serverId: server.id },
+    );
+    if (server.isMain) mainJob = jobId;
+  }
+  return mainJob;
 }
 
 /** Lowest free internal port block. Instance i of a Node/Python site listens on port + i. */
@@ -124,4 +133,10 @@ export async function allocatePort(instances: number, excludeSiteId?: string): P
 export function serviceUnitNames(linuxUser: string, site: Pick<Site, "name" | "runtime" | "instances">): string[] {
   if (site.runtime !== "node" && site.runtime !== "python") return [];
   return Array.from({ length: site.instances }, (_, i) => `hp-${linuxUser}-${site.name}-${i}.service`);
+}
+
+/** The server an account lives on (for DNS targets and main-only features). */
+export async function serverOf(serverId: string) {
+  const s = await db.query.servers.findFirst({ where: eq(schema.servers.id, serverId) });
+  return { isMain: s?.isMain ?? true, ipv4: s?.ipv4 ?? config.serverIpv4, ipv6: s?.ipv6 ?? config.serverIpv6, name: s?.name ?? "Main server" };
 }

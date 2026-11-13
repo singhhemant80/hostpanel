@@ -16,6 +16,10 @@ const icons: Record<string, string> = {
   backups: "M12 3v12M7 10l5 5 5-5M4 19h16",
   access: "M4 6h16v12H4zM7 10l3 2-3 2M12 14h5",
   server: "M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01",
+  email: "M3 6h18v12H3zM3 6l9 7 9-7",
+  apps: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
+  resellers: "M9 11a3 3 0 100-6 3 3 0 000 6zM17 11a3 3 0 100-6M3 20c0-3 3-5 6-5s6 2 6 5M15 15c3 0 6 2 6 5",
+  servers: "M4 4h16v5H4zM4 15h16v5H4zM12 9v6M8 6.5h.01M8 17.5h.01",
   settings: "M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z",
 };
 
@@ -30,8 +34,8 @@ function Icon({ name }: { name: string }) {
 export function Layout() {
   const { t, i18n } = useTranslation();
   const { user, signOut } = useAuth();
-  const items = ["dashboard", "sites", "domains", "dns", "databases", "files", "backups", "access"];
-  const adminItems = ["accounts", "packages", "server"];
+  const items = ["dashboard", "sites", "apps", "domains", "dns", "email", "databases", "files", "backups", "access"];
+  const adminItems = user?.role === "admin" ? ["accounts", "resellers", "packages", "servers", "server"] : ["accounts"];
 
   const link = (key: string) => (
     <NavLink
@@ -56,7 +60,7 @@ export function Layout() {
         </div>
         <nav className="flex flex-1 flex-col gap-1">
           {items.map(link)}
-          {user?.role === "admin" && (
+          {user?.role !== "user" && (
             <>
               <p className="mb-1 mt-5 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400">{t("nav.admin")}</p>
               {adminItems.map(link)}
@@ -92,7 +96,7 @@ export function Layout() {
           </div>
         </header>
         <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-white px-2 py-1.5 md:hidden">
-          {[...items, ...(user?.role === "admin" ? adminItems : []), "settings"].map(link)}
+          {[...items, ...(user?.role !== "user" ? adminItems : []), "settings"].map(link)}
         </nav>
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8">
           <Outlet />

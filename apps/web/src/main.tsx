@@ -21,6 +21,10 @@ import { BackupsPage } from "./pages/Backups";
 import { DnsPage } from "./pages/Dns";
 import { AccountAccessPage } from "./pages/AccountAccess";
 import { ServerSettingsPage } from "./pages/ServerSettings";
+import { EmailPage } from "./pages/Email";
+import { AppsPage } from "./pages/Apps";
+import { ResellersPage } from "./pages/Resellers";
+import { ServersPage } from "./pages/Servers";
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } });
 
@@ -41,8 +45,12 @@ function Gate() {
         <Route path="files" element={<FilesPage />} />
         <Route path="backups" element={<BackupsPage />} />
         <Route path="access" element={<AccountAccessPage />} />
+        <Route path="email" element={<EmailPage />} />
+        <Route path="apps" element={<AppsPage />} />
         {user.role === "admin" && <Route path="server" element={<ServerSettingsPage />} />}
-        {user.role === "admin" && <Route path="accounts" element={<AccountsPage />} />}
+        {user.role !== "user" && <Route path="accounts" element={<AccountsPage />} />}
+        {user.role === "admin" && <Route path="resellers" element={<ResellersPage />} />}
+        {user.role === "admin" && <Route path="servers" element={<ServersPage />} />}
         {user.role === "admin" && <Route path="packages" element={<PackagesPage />} />}
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

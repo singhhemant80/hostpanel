@@ -12,6 +12,7 @@ import {
   needsPort,
   paths,
   updateSiteSchema,
+  type CreateSiteInput,
   type Runtime,
 } from "@hostpanel/shared";
 import { db, schema } from "../db.js";
@@ -19,8 +20,8 @@ import { encrypt } from "../crypto.js";
 import { badRequest, conflict, notFound } from "../errors.js";
 import { accountFilter, audit, currentUser, requireAuth } from "../auth.js";
 import { ownedSite, resolveAccount } from "../access.js";
-import { enqueue } from "../queue.js";
-import { allocatePort, loadSiteSpec, syncRoutes } from "../specs.js";
+import { enqueue, redis } from "../queue.js";
+import { allocatePort, loadSiteSpec, serverOf, syncRoutes } from "../specs.js";
 import { startDeployment } from "../deploy.js";
 import { syncSiteCron } from "./cron.js";
 import { config } from "../config.js";
@@ -47,51 +48,7 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
     const input = createSiteSchema.parse(req.body);
     const user = currentUser(req);
     const account = await resolveAccount(req, input.accountId);
-
-    if (!RUNTIME_VERSIONS[input.runtime].includes(input.runtimeVersion)) {
-      throw badRequest(`Unsupported ${input.runtime} version ${input.runtimeVersion}`);
-    }
-    const background = input.background && needsPort(input.runtime);
-    if (input.background && !background) throw badRequest("Only Node.js and Python sites can run as background workers");
-    if (!background && !input.primaryDomain) throw badRequest("A primary domain is required");
-    const [[sc], [dc]] = await Promise.all([
-      db.select({ n: count() }).from(schema.sites).where(eq(schema.sites.accountId, account.id)),
-      db.select({ n: count() }).from(schema.domains).where(eq(schema.domains.accountId, account.id)),
-    ]);
-    if (sc!.n >= account.package.maxSites) throw badRequest(`Your plan allows ${account.package.maxSites} site(s)`);
-    if (!background && dc!.n >= account.package.maxDomains) throw badRequest(`Your plan allows ${account.package.maxDomains} domains`);
-    if (input.primaryDomain && !background && (await db.query.domains.findFirst({ where: eq(schema.domains.hostname, input.primaryDomain) }))) {
-      throw conflict("That domain is already on this server");
-    }
-    if (await db.query.sites.findFirst({ where: and(eq(schema.sites.accountId, account.id), eq(schema.sites.name, input.name)) })) {
-      throw conflict("You already have a site with that name");
-    }
-
-    const d = RUNTIME_DEFAULTS[input.runtime as Runtime];
-    const port = needsPort(input.runtime) ? await allocatePort(input.instances) : null;
-    const site = await db.transaction(async (tx) => {
-      const [s] = await tx
-        .insert(schema.sites)
-        .values({
-          accountId: account.id,
-          name: input.name,
-          runtime: input.runtime,
-          runtimeVersion: input.runtimeVersion,
-          rootDir: input.rootDir,
-          publicDir: input.publicDir ?? d.publicDir,
-          buildCmd: input.buildCmd ?? d.buildCmd,
-          startCmd: input.startCmd ?? d.startCmd,
-          healthPath: input.healthPath,
-          instances: needsPort(input.runtime) ? input.instances : 1,
-          port,
-          background,
-        })
-        .returning();
-      if (!background && input.primaryDomain) {
-        await tx.insert(schema.domains).values({ accountId: account.id, siteId: s!.id, hostname: input.primaryDomain, type: "primary" });
-      }
-      return s!;
-    });
+    const site = await createSiteRecord(account, input);
     const jobId = await enqueue("site.provision", { site: await loadSiteSpec(site.id) }, { targetType: "site", targetId: site.id, createdBy: user.id });
     await syncRoutes(user.id);
     await audit(req, "site.create", "site", site.id, { name: site.name, runtime: site.runtime });
@@ -107,7 +64,8 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
         env: site.env.map((e) => ({ key: e.key })),
         paths: { home: paths.site(site.account.linuxUser, site.name), current: paths.current(site.account.linuxUser, site.name) },
       },
-      dnsTargets: { ipv4: config.serverIpv4, ipv6: config.serverIpv6 },
+      dnsTargets: await serverOf(site.account.serverId).then((s) => ({ ipv4: s.ipv4, ipv6: s.ipv6 })),
+      server: await serverOf(site.account.serverId).then((s) => ({ name: s.name, isMain: s.isMain })),
       webhookUrl: `${config.panelUrl}/api/v1/webhooks/github`,
     };
   });
@@ -264,7 +222,11 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
     const done = !["queued", "building"].includes(dep.status);
     const file = config.devSandboxRoot + paths.deployLog(dep.id);
     const st = await stat(file).catch(() => null);
-    if (!st) return { text: "", offset: 0, done, status: dep.status };
+    if (!st) {
+      // built on another server: the agent mirrors the log to Redis
+      const text = (await redis.getrange(`hp:deploylog:${dep.id}`, offset, offset + 256 * 1024 - 1)) ?? "";
+      return { text, offset: offset + Buffer.byteLength(text), done: done && text.length === 0, status: dep.status };
+    }
     const start = Math.min(offset, st.size);
     const len = Math.min(st.size - start, 256 * 1024);
     const fh = await open(file, "r");
@@ -308,4 +270,56 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
     if (!job || (user.role !== "admin" && job.createdBy !== user.id)) throw notFound("Job not found");
     return { job };
   });
+}
+
+/** Validates plan limits and creates the site + primary domain rows (no jobs). Shared with one-click apps. */
+export async function createSiteRecord(
+  account: { id: string; package: { maxSites: number; maxDomains: number } },
+  input: CreateSiteInput,
+) {
+  if (!RUNTIME_VERSIONS[input.runtime].includes(input.runtimeVersion)) {
+    throw badRequest(`Unsupported ${input.runtime} version ${input.runtimeVersion}`);
+  }
+  const background = input.background && needsPort(input.runtime);
+  if (input.background && !background) throw badRequest("Only Node.js and Python sites can run as background workers");
+  if (!background && !input.primaryDomain) throw badRequest("A primary domain is required");
+  const [[sc], [dc]] = await Promise.all([
+    db.select({ n: count() }).from(schema.sites).where(eq(schema.sites.accountId, account.id)),
+    db.select({ n: count() }).from(schema.domains).where(eq(schema.domains.accountId, account.id)),
+  ]);
+  if (sc!.n >= account.package.maxSites) throw badRequest(`Your plan allows ${account.package.maxSites} site(s)`);
+  if (!background && dc!.n >= account.package.maxDomains) throw badRequest(`Your plan allows ${account.package.maxDomains} domains`);
+  if (input.primaryDomain && !background && (await db.query.domains.findFirst({ where: eq(schema.domains.hostname, input.primaryDomain) }))) {
+    throw conflict("That domain is already on this server");
+  }
+  if (await db.query.sites.findFirst({ where: and(eq(schema.sites.accountId, account.id), eq(schema.sites.name, input.name)) })) {
+    throw conflict("You already have a site with that name");
+  }
+
+  const d = RUNTIME_DEFAULTS[input.runtime as Runtime];
+  const port = needsPort(input.runtime) ? await allocatePort(input.instances) : null;
+  const site = await db.transaction(async (tx) => {
+    const [s] = await tx
+      .insert(schema.sites)
+      .values({
+        accountId: account.id,
+        name: input.name,
+        runtime: input.runtime,
+        runtimeVersion: input.runtimeVersion,
+        rootDir: input.rootDir,
+        publicDir: input.publicDir ?? d.publicDir,
+        buildCmd: input.buildCmd ?? d.buildCmd,
+        startCmd: input.startCmd ?? d.startCmd,
+        healthPath: input.healthPath,
+        instances: needsPort(input.runtime) ? input.instances : 1,
+        port,
+        background,
+      })
+      .returning();
+    if (!background && input.primaryDomain) {
+      await tx.insert(schema.domains).values({ accountId: account.id, siteId: s!.id, hostname: input.primaryDomain, type: "primary" });
+    }
+    return s!;
+  });
+  return site;
 }

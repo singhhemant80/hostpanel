@@ -4,13 +4,19 @@ import { z } from "zod";
 import { createAccountSchema, packageSchema } from "@hostpanel/shared";
 import { db, schema } from "../db.js";
 import { conflict, notFound } from "../errors.js";
-import { accountFilter, audit, currentUser, requireAdmin, requireAuth } from "../auth.js";
+import { accountFilter, audit, currentUser, requireAdmin, requireAdminOrReseller, requireAuth } from "../auth.js";
+import { assertManages, assertResellerCanCreate } from "../services/resellers.js";
 import { createAccount, deleteAccount, setAccountSuspended } from "../services/accounts.js";
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // ---- Packages ----
-  app.get("/packages", { preHandler: requireAuth }, async () => {
-    const pkgs = await db.query.packages.findMany({ orderBy: asc(schema.packages.name) });
+  app.get("/packages", { preHandler: requireAuth }, async (req) => {
+    let pkgs = await db.query.packages.findMany({ orderBy: asc(schema.packages.name) });
+    const me = currentUser(req);
+    if (me.role === "reseller") {
+      const limits = await db.query.resellerLimits.findFirst({ where: eq(schema.resellerLimits.userId, me.id) });
+      pkgs = pkgs.filter((p) => limits?.packageIds.includes(p.id));
+    }
     const usage = await db
       .select({ packageId: schema.accounts.packageId, n: count() })
       .from(schema.accounts)
@@ -48,6 +54,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       where: await accountFilter(schema.accounts.id, currentUser(req)),
       with: {
         user: { columns: { id: true, email: true, name: true } },
+        reseller: { columns: { id: true, email: true, name: true } },
         package: true,
         sites: { columns: { id: true } },
         domains: { columns: { id: true } },
@@ -63,33 +70,42 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  app.post("/accounts", { preHandler: requireAdmin }, async (req) => {
+  app.post("/accounts", { preHandler: requireAdminOrReseller }, async (req) => {
     const input = createAccountSchema.parse(req.body);
-    const result = await createAccount(input, currentUser(req).id);
+    const me = currentUser(req);
+    if (me.role === "reseller") {
+      delete input.serverId; // resellers' customers go on the main server
+      await assertResellerCanCreate(me.id, input.packageId);
+    }
+    const result = await createAccount(input, me.id, me.role === "reseller" ? me.id : null);
     await audit(req, "account.create", "account", result.account.id, { username: input.username });
     return result;
   });
 
-  app.post("/accounts/:id/suspend", { preHandler: requireAdmin }, async (req) => {
+  app.post("/accounts/:id/suspend", { preHandler: requireAdminOrReseller }, async (req) => {
     const { id } = req.params as { id: string };
+    await assertManages(req, id);
     const { suspended } = z.object({ suspended: z.boolean() }).parse(req.body);
     const r = await setAccountSuspended(id, suspended, currentUser(req).id);
     await audit(req, suspended ? "account.suspend" : "account.unsuspend", "account", id);
     return r;
   });
 
-  app.patch("/accounts/:id", { preHandler: requireAdmin }, async (req) => {
+  app.patch("/accounts/:id", { preHandler: requireAdminOrReseller }, async (req) => {
     const { id } = req.params as { id: string };
+    await assertManages(req, id);
     const { packageId } = z.object({ packageId: z.string() }).parse(req.body);
     if (!(await db.query.packages.findFirst({ where: eq(schema.packages.id, packageId) }))) throw notFound("Package not found");
+    if (currentUser(req).role === "reseller") await assertResellerCanCreate(currentUser(req).id, packageId, id);
     const [account] = await db.update(schema.accounts).set({ packageId }).where(eq(schema.accounts.id, id)).returning();
     if (!account) throw notFound("Account not found");
     await audit(req, "account.change_package", "account", id, { packageId });
     return { account };
   });
 
-  app.delete("/accounts/:id", { preHandler: requireAdmin }, async (req) => {
+  app.delete("/accounts/:id", { preHandler: requireAdminOrReseller }, async (req) => {
     const { id } = req.params as { id: string };
+    await assertManages(req, id);
     const r = await deleteAccount(id, currentUser(req).id);
     await audit(req, "account.delete", "account", id);
     return r;

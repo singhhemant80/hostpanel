@@ -3,7 +3,7 @@ import type { DeployResult } from "@hostpanel/shared";
 import { db, schema } from "./db.js";
 import { deploymentUrl } from "./deploy.js";
 import { setCommitStatus } from "./github.js";
-import { queueEvents } from "./queue.js";
+import { eventsFor } from "./queue.js";
 
 type Log = { error: (o: unknown, m?: string) => void };
 
@@ -12,8 +12,21 @@ type Log = { error: (o: unknown, m?: string) => void };
  * (site/domain/account status, deployment status, GitHub commit status).
  * Runs in exactly one API process (see server.ts).
  */
-export function startEventListener(log: Log): void {
-  const ev = queueEvents();
+const listening = new Set<string>();
+let logRef: Log | null = null;
+
+/** Listen to every server's queue (call again after a server joins). */
+export async function startEventListener(log: Log): Promise<void> {
+  logRef = log;
+  const servers = await db.query.servers.findMany({ columns: { queueSuffix: true } });
+  for (const s of new Set(["", ...servers.map((x) => x.queueSuffix)])) listenServer(s);
+}
+
+export function listenServer(suffix: string): void {
+  if (listening.has(suffix) || !logRef) return;
+  listening.add(suffix);
+  const log = logRef;
+  const ev = eventsFor(suffix);
   const safe = (p: Promise<unknown>, what: string) => void p.catch((e) => log.error(e, what));
 
   ev.on("active", ({ jobId }) => safe(onActive(jobId), "job active handler failed"));
@@ -36,7 +49,7 @@ async function onActive(jobId: string): Promise<void> {
   if (job?.type === "backup.run" && job.targetId) {
     await db.update(schema.backups).set({ status: "running" }).where(eq(schema.backups.id, job.targetId));
   }
-  if (job && (job.type === "site.deploy" || job.type === "site.rollback") && job.targetId) {
+  if (job && (job.type === "site.deploy" || job.type === "site.rollback" || job.type === "app.install") && job.targetId) {
     await db.update(schema.deployments).set({ status: "building", startedAt: new Date() }).where(eq(schema.deployments.id, job.targetId));
   }
 }
@@ -81,6 +94,17 @@ export async function onDone(jobId: string, ok: boolean, returnvalue: unknown, e
     case "site.rollback":
       await onDeployDone(id, ok, returnvalue as DeployResult | null, error);
       break;
+    case "app.install": {
+      await onDeployDone(id, ok, returnvalue as DeployResult | null, error);
+      // the app's database (if any) was created by the same job
+      const dep = await db.query.deployments.findFirst({ where: eq(schema.deployments.id, id), with: { site: { with: { account: true } } } });
+      if (dep) {
+        const dbName = `${dep.site.account.username}_${dep.site.name}`.replace(/-/g, "_").slice(0, 63);
+        await db.update(schema.databases).set({ status: ok ? "active" : "failed" }).where(eq(schema.databases.name, dbName));
+        await db.update(schema.sites).set({ status: ok ? "active" : "failed" }).where(eq(schema.sites.id, dep.siteId));
+      }
+      break;
+    }
     case "backup.run": {
       const r = returnvalue as { fileName: string; sizeBytes: number; remote: boolean } | null;
       await db

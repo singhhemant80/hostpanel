@@ -3,11 +3,13 @@ import { statfs } from "node:fs/promises";
 import type { JobPayloads, SystemStats } from "@hostpanel/shared";
 import { decrypt } from "../env.js";
 import { run } from "../exec.js";
-import { applyCaddyfile, buildCaddyfile, writeCustomCerts } from "../caddy.js";
+import { WEBMAIL_ROOT, applyCaddyfile, buildCaddyfile, writeCustomCerts } from "../caddy.js";
+import { exists } from "../fsx.js";
 
 export async function routesSync(p: JobPayloads["routes.sync"]): Promise<{ routes: number }> {
   await writeCustomCerts(p.routes);
-  await applyCaddyfile(buildCaddyfile(p.routes, p.panelHostname, p.acmeEmail, p.dnsTokenEnc ? decrypt(p.dnsTokenEnc) : null));
+  const webmail = Boolean(p.panelHostname) && (await exists(`${WEBMAIL_ROOT}/index.php`));
+  await applyCaddyfile(buildCaddyfile(p.routes, p.panelHostname, p.acmeEmail, p.dnsTokenEnc ? decrypt(p.dnsTokenEnc) : null, webmail));
   return { routes: p.routes.length };
 }
 

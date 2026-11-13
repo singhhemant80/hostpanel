@@ -33,3 +33,21 @@ test("Cloudflare client sends the token and surfaces API errors", async () => {
   assert.equal((calls[0]!.init.headers as Record<string, string>).Authorization, "Bearer tok_123");
   await assert.rejects(cf.createRecord("z1", { type: "A", name: "shop.in", content: "1.2.3.4", ttl: 1 }), /Record already exists/);
 });
+
+test("mail DNS records: MX, SPF, DKIM, DMARC", async () => {
+  Object.assign(process.env, {
+    PANEL_HOSTNAME: "panel.acme.in",
+    PANEL_URL: "https://panel.acme.in",
+    DATABASE_URL: process.env.DATABASE_URL ?? "postgresql://x:y@127.0.0.1:1/none",
+    REDIS_URL: process.env.REDIS_URL ?? "redis://127.0.0.1:1",
+    JWT_SECRET: process.env.JWT_SECRET ?? "t".repeat(64),
+    APP_ENCRYPTION_KEY: process.env.APP_ENCRYPTION_KEY ?? "1".repeat(64),
+  });
+  const { mailDnsRecords, DKIM_SELECTOR } = await import("../src/mail.js");
+  const recs = mailDnsRecords("shop.in", "v=DKIM1; k=rsa; p=ABC");
+  assert.deepEqual(recs.map((r) => r.type), ["MX", "TXT", "TXT", "TXT"]);
+  assert.equal(recs[0]!.priority, 10);
+  assert.ok(recs.some((r) => r.name === `${DKIM_SELECTOR}._domainkey.shop.in` && r.content.startsWith("v=DKIM1")));
+  assert.ok(recs.some((r) => r.name === "_dmarc.shop.in"));
+  assert.equal(mailDnsRecords("shop.in", null).length, 3);
+});

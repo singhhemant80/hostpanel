@@ -4,7 +4,7 @@
  * a fixed handler and a strict payload schema (validate.ts).
  */
 import { Worker, type Job } from "bullmq";
-import { AGENT_QUEUE, FAST_QUEUE } from "@hostpanel/shared";
+import { heartbeatKey, queueNames } from "@hostpanel/shared";
 import { env } from "./env.js";
 import { parsePayload } from "./validate.js";
 import { accountCreate, accountDelete, accountSuspend } from "./handlers/accounts.js";
@@ -16,6 +16,10 @@ import { backupDelete, backupRestore, backupRun } from "./handlers/backup.js";
 import { accessSync, logsRead, statsAccount } from "./handlers/access.js";
 import * as files from "./handlers/files.js";
 import { startTerminalServer } from "./terminal.js";
+import { mailDkim, mailPurge, mailSync, mailUsage } from "./handlers/mail.js";
+import { appInstall } from "./handlers/apps.js";
+import { serverAddPeer, serverRemovePeer } from "./handlers/servers.js";
+import { redis } from "./redis.js";
 
 export async function handle(job: Job): Promise<unknown> {
   const type = job.name;
@@ -85,6 +89,20 @@ export async function handle(job: Job): Promise<unknown> {
         return await logsRead(parsePayload<"logs.read">(type, job.data));
       case "stats.account":
         return await statsAccount(parsePayload<"stats.account">(type, job.data));
+      case "mail.sync":
+        return await mailSync(parsePayload<"mail.sync">(type, job.data));
+      case "mail.dkim":
+        return await mailDkim(parsePayload<"mail.dkim">(type, job.data));
+      case "mail.purge":
+        return await mailPurge(parsePayload<"mail.purge">(type, job.data));
+      case "mail.usage":
+        return await mailUsage(parsePayload<"mail.usage">(type, job.data));
+      case "app.install":
+        return await appInstall(parsePayload<"app.install">(type, job.data), job);
+      case "server.addPeer":
+        return await serverAddPeer(parsePayload<"server.addPeer">(type, job.data));
+      case "server.removePeer":
+        return await serverRemovePeer(parsePayload<"server.removePeer">(type, job.data));
       default:
         throw new Error(`Unknown job type ${type}`);
     }
@@ -110,16 +128,22 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop()
     console.error("hostpanel-agent must run as root (or set AGENT_DRY_RUN=true for development)");
     process.exit(1);
   }
-  const worker = new Worker(AGENT_QUEUE, handle, {
+  const q = queueNames(env.queueSuffix);
+  const worker = new Worker(q.jobs, handle, {
     connection: redisOptions(),
     concurrency: env.concurrency,
     lockDuration: 60_000,
   });
   // Interactive jobs (files, logs, usage) get their own worker so a 10-minute build never blocks them.
-  const fast = new Worker(FAST_QUEUE, handle, { connection: redisOptions(), concurrency: 8, lockDuration: 60_000 });
+  const fast = new Worker(q.fast, handle, { connection: redisOptions(), concurrency: 8, lockDuration: 60_000 });
   for (const w of [worker, fast]) w.on("failed", (job, err) => console.error(`✗ ${job?.name} #${job?.id}: ${err.message}`));
-  void startTerminalServer().catch((e) => console.error("terminal server failed:", e));
-  worker.on("ready", () => console.log(`HostPanel agent ready${env.dryRun ? ` (DRY RUN, sandbox ${env.dryRoot})` : ""}`));
+  // The web terminal is only offered on the main server (the panel connects to it over a local socket).
+  if (!env.queueSuffix) void startTerminalServer().catch((e) => console.error("terminal server failed:", e));
+  // Heartbeat so the panel can show which servers are online.
+  const beat = () => void redis().set(heartbeatKey(env.queueSuffix), new Date().toISOString(), "EX", 90).catch(() => undefined);
+  beat();
+  setInterval(beat, 30_000).unref();
+  worker.on("ready", () => console.log(`HostPanel agent ready on queue ${q.jobs}${env.dryRun ? ` (DRY RUN, sandbox ${env.dryRoot})` : ""}`));
   const stop = async () => {
     await Promise.all([worker.close(), fast.close()]);
     process.exit(0);

@@ -112,6 +112,7 @@ export interface Package {
   maxSites: number;
   maxDomains: number;
   maxDatabases: number;
+  maxMailboxes: number;
   cpuPercent: number;
   ramMb: number;
   accountCount?: number;
@@ -123,6 +124,8 @@ export interface Account {
   status: string;
   createdAt: string;
   user: { id: string; email: string; name: string };
+  serverId?: string | null;
+  reseller?: { id: string; email: string; name: string } | null;
   package: Package;
   counts: { sites: number; domains: number; databases: number };
 }

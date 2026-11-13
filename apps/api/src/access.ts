@@ -1,13 +1,18 @@
 import type { FastifyRequest } from "fastify";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, or } from "drizzle-orm";
 import { db, schema } from "./db.js";
 import { badRequest, forbidden, notFound } from "./errors.js";
-import { currentUser } from "./auth.js";
+import { currentUser, type AuthUser } from "./auth.js";
 
 /** The account a new resource goes into: explicit (checked) or the user's only active account. */
 export async function resolveAccount(req: FastifyRequest, accountId?: string) {
   const user = currentUser(req);
-  const mine = user.role === "admin" ? undefined : eq(schema.accounts.userId, user.id);
+  const mine =
+    user.role === "admin"
+      ? undefined
+      : user.role === "reseller"
+        ? or(eq(schema.accounts.userId, user.id), eq(schema.accounts.resellerId, user.id))
+        : eq(schema.accounts.userId, user.id);
   if (accountId) {
     const acc = await db.query.accounts.findFirst({ where: and(eq(schema.accounts.id, accountId), mine), with: { package: true } });
     if (!acc) throw notFound("Account not found");
@@ -27,7 +32,7 @@ export async function ownedSite(req: FastifyRequest, siteId: string) {
   });
   if (!site) throw notFound("Site not found");
   const user = currentUser(req);
-  if (user.role !== "admin" && site.account.userId !== user.id) throw forbidden();
+  if (!(await canSee(user, site.account))) throw forbidden();
   return site;
 }
 
@@ -35,7 +40,7 @@ export async function ownedDomain(req: FastifyRequest, domainId: string) {
   const domain = await db.query.domains.findFirst({ where: eq(schema.domains.id, domainId), with: { account: { with: { package: true } }, site: true } });
   if (!domain) throw notFound("Domain not found");
   const user = currentUser(req);
-  if (user.role !== "admin" && domain.account.userId !== user.id) throw forbidden();
+  if (!(await canSee(user, domain.account))) throw forbidden();
   return domain;
 }
 
@@ -43,7 +48,7 @@ export async function ownedDatabase(req: FastifyRequest, id: string) {
   const row = await db.query.databases.findFirst({ where: eq(schema.databases.id, id), with: { account: true } });
   if (!row) throw notFound("Database not found");
   const user = currentUser(req);
-  if (user.role !== "admin" && row.account.userId !== user.id) throw forbidden();
+  if (!(await canSee(user, row.account))) throw forbidden();
   return row;
 }
 
@@ -51,6 +56,13 @@ export async function ownedAccount(req: FastifyRequest, accountId: string) {
   const acc = await db.query.accounts.findFirst({ where: eq(schema.accounts.id, accountId), with: { package: true } });
   if (!acc) throw notFound("Account not found");
   const user = currentUser(req);
-  if (user.role !== "admin" && acc.userId !== user.id) throw forbidden();
+  if (!(await canSee(user, acc))) throw forbidden();
   return acc;
+}
+
+/** Admins see everything; resellers their customers' accounts too; users only their own. */
+export async function canSee(user: AuthUser, account: { userId: string; resellerId: string | null }): Promise<boolean> {
+  if (user.role === "admin") return true;
+  if (account.userId === user.id) return true;
+  return user.role === "reseller" && account.resellerId === user.id;
 }

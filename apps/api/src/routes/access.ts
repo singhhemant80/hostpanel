@@ -12,6 +12,7 @@ import { encrypt } from "../crypto.js";
 import { audit, currentUser, requireAuth, ACCESS_COOKIE } from "../auth.js";
 import { ownedAccount } from "../access.js";
 import { enqueue } from "../queue.js";
+import { serverOf } from "../specs.js";
 
 export async function accessRoutes(app: FastifyInstance): Promise<void> {
   app.get("/accounts/:id/access", { preHandler: requireAuth }, async (req) => {
@@ -93,6 +94,8 @@ export function attachTerminal(app: FastifyInstance): void {
       if (!site || (role !== "admin" && site.account.userId !== userId)) return reject(socket, 404, "Not Found");
       if (role !== "admin" && !site.account.access?.shell) return reject(socket, 403, "Forbidden");
       if (site.account.status !== "active") return reject(socket, 403, "Forbidden");
+      // the terminal socket is local to the main server; other servers: use SSH
+      if (!(await serverOf(site.account.serverId)).isMain) return reject(socket, 501, "Not Implemented");
 
       const t = signTerminalToken({
         u: site.account.linuxUser,

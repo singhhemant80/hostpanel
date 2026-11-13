@@ -5,7 +5,7 @@ import { DEFAULT_VERSION, RUNTIME_DEFAULTS, RUNTIME_VERSIONS, RUNTIMES } from "@
 import { config } from "../config.js";
 import { db, schema } from "../db.js";
 import { currentUser, requireAdmin, requireAuth, visibleAccountIds } from "../auth.js";
-import { agentQueue, enqueue, queueEvents } from "../queue.js";
+import { agentQueue, enqueue, eventsFor, queuesFor, serverSuffix } from "../queue.js";
 import { syncRoutes } from "../specs.js";
 import { githubConfigured } from "../github.js";
 
@@ -53,11 +53,13 @@ export async function systemRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get("/system/stats", { preHandler: requireAdmin }, async (req) => {
-    const id = await enqueue("system.stats", {}, { targetType: "server", createdBy: currentUser(req).id });
-    const job = await Job.fromId(agentQueue, id);
+    const { server } = req.query as { server?: string };
+    const suffix = await serverSuffix(server ?? null);
+    const id = await enqueue("system.stats", {}, { targetType: "server", createdBy: currentUser(req).id, serverId: server ?? null });
+    const job = await Job.fromId(queuesFor(suffix).jobs, id);
     if (!job) return { stats: null };
     try {
-      return { stats: await job.waitUntilFinished(queueEvents(), 10_000) };
+      return { stats: await job.waitUntilFinished(eventsFor(suffix), 10_000) };
     } catch {
       return { stats: null, error: "The agent did not answer within 10 seconds. Is hostpanel-agent running?" };
     }

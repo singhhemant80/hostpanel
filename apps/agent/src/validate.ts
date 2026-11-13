@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { JOB_TYPES, RUNTIMES, RUNTIME_VERSIONS, type JobPayloads, type JobType } from "@hostpanel/shared";
+import { APP_TEMPLATES, JOB_TYPES, RUNTIMES, RUNTIME_VERSIONS, type JobPayloads, type JobType } from "@hostpanel/shared";
 
 /**
  * Second line of defence: the agent re-validates every payload even though the API
@@ -29,6 +29,9 @@ const remote = z
     secretKeyEnc: enc,
   })
   .nullable();
+/** user@domain, lower-case; local part limited to characters safe in Postfix/Dovecot table files. */
+const email = z.string().max(254).regex(/^[a-z0-9]([a-z0-9._+-]*[a-z0-9])?@([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/);
+const wgKey = z.string().regex(/^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw480]=$/);
 const dbRef = z.object({ engine: z.enum(["mariadb", "postgres"]), name: z.string().regex(/^[a-z][a-z0-9_]{1,62}$/) });
 const relPath = z.string().regex(/^[A-Za-z0-9._/-]*$/).refine((p) => !p.startsWith("/") && !p.split("/").includes(".."));
 const absPath = z.string().regex(/^\/[A-Za-z0-9._/-]+$/).refine((p) => !p.split("/").includes(".."));
@@ -131,7 +134,7 @@ const schemas: { [K in JobType]: z.ZodType<JobPayloads[K]> } = {
     sshKeys: z.array(z.string().regex(/^[A-Za-z0-9@.-]+ [A-Za-z0-9+/=]+( [^\n\r]{0,200})?$/)).max(20),
   }),
   "fs.list": z.object({ linuxUser, path: homePath }),
-  "fs.read": z.object({ linuxUser, path: homePath }),
+  "fs.read": z.object({ linuxUser, path: homePath, maxBytes: z.number().int().min(1).max(25 * 1024 * 1024).optional() }),
   "fs.write": z.object({ linuxUser, path: homePath.refine((p) => p !== ""), contentB64: z.string().max(14_000_000) }),
   "fs.mkdir": z.object({ linuxUser, path: homePath.refine((p) => p !== "") }),
   "fs.rename": z.object({ linuxUser, from: homePath.refine((p) => p !== ""), to: homePath.refine((p) => p !== "") }),
@@ -142,6 +145,27 @@ const schemas: { [K in JobType]: z.ZodType<JobPayloads[K]> } = {
   "fs.extract": z.object({ linuxUser, path: homePath.refine((p) => /\.(zip|tar|tar\.gz|tgz|tar\.xz)$/i.test(p)), into: homePath }),
   "fs.compress": z.object({ linuxUser, paths: z.array(homePath.refine((p) => p !== "")).min(1).max(500), to: homePath.refine((p) => p.endsWith(".zip")) }),
   "logs.read": z.object({ linuxUser, siteName, log: z.enum(["access", "app", "php-error", "cron"]), bytes: z.number().int().min(1024).max(2_000_000) }),
+  "mail.sync": z.object({
+    mailHost: hostname,
+    domains: z.array(z.object({ name: hostname, catchAll: z.string().regex(/^[a-z0-9._%+@,-]+$/).max(2000).nullable() })).max(5000),
+    mailboxes: z
+      .array(z.object({ address: email, passwordHash: z.string().regex(/^\$2[aby]\$\d\d\$[./A-Za-z0-9]{53}$/), quotaMb: z.number().int().min(1).max(1_000_000), enabled: z.boolean() }))
+      .max(100_000),
+    aliases: z.array(z.object({ source: email, destinations: z.array(email).min(1).max(50) })).max(100_000),
+  }),
+  "mail.dkim": z.object({ domain: hostname, selector: z.string().regex(/^[a-z0-9-]{1,63}$/) }),
+  "mail.purge": z.object({ address: email }),
+  "mail.usage": z.object({ addresses: z.array(email).max(1000) }),
+  "app.install": z.object({
+    site: siteSpec,
+    template: z.enum(APP_TEMPLATES),
+    domain: hostname,
+    deploymentId: z.string().regex(/^[a-z0-9]+$/),
+    db: z.object({ engine: z.enum(["mariadb", "postgres"]), name: z.string().regex(/^[a-z][a-z0-9_]{1,62}$/), user: z.string().regex(/^[a-z][a-z0-9_]{1,62}$/), passwordEnc: enc }).nullable(),
+    admin: z.object({ user: z.string().regex(/^[A-Za-z0-9_.-]{1,60}$/), email: z.string().email(), passwordEnc: enc }).nullable(),
+  }),
+  "server.addPeer": z.object({ publicKey: wgKey, address: z.string().regex(/^10\.88\.\d{1,3}\.\d{1,3}$/) }),
+  "server.removePeer": z.object({ publicKey: wgKey }),
   "stats.account": z.object({ linuxUser, units: z.array(z.string().regex(/^hp-[a-z0-9_-]+\.(service|slice)$/)).max(50) }),
 };
 

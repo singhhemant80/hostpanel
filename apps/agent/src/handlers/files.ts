@@ -66,11 +66,12 @@ export async function fsList({ linuxUser, path }: JobPayloads["fs.list"]): Promi
   return { path, entries, truncated: r.stdout.split("\0").length > 5001 };
 }
 
-export async function fsRead({ linuxUser, path }: JobPayloads["fs.read"]): Promise<{ contentB64: string; size: number; binary: boolean }> {
+export async function fsRead({ linuxUser, path, maxBytes }: JobPayloads["fs.read"]): Promise<{ contentB64: string; size: number; binary: boolean }> {
   const file = await resolveIn(linuxUser, path);
   const st = await stat(file);
   if (st.isDirectory()) throw new Error("That is a folder");
-  if (st.size > MAX_READ) throw new Error(`File is ${(st.size / 1048576).toFixed(1)} MB; the editor opens files up to 2 MB. Download it instead.`);
+  const limit = maxBytes ?? MAX_READ;
+  if (st.size > limit) throw new Error(`File is ${(st.size / 1048576).toFixed(1)} MB; the limit here is ${Math.round(limit / 1048576)} MB.`);
   const r = await runAs(linuxUser, "cat", ["--", file], { binary: true });
   const bytes = r.bytes ?? Buffer.alloc(0);
   const binary = bytes.subarray(0, 8000).includes(0);

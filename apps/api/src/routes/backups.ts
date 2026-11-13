@@ -12,7 +12,7 @@ import { accountFilter, audit, currentUser, requireAdmin, requireAuth } from "..
 import { ownedAccount } from "../access.js";
 import { enqueue } from "../queue.js";
 import { getSetting, remoteSpec, setSetting } from "../settings.js";
-import { siteSpec } from "../specs.js";
+import { serverOf, siteSpec } from "../specs.js";
 
 /** Queue a full backup of one account (all sites + databases). */
 export async function startBackup(accountId: string, trigger: "scheduled" | "manual", createdBy?: string) {
@@ -86,6 +86,7 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
     if (!backup.fileName) throw badRequest("Backup is not finished");
     const file = `${config.devSandboxRoot}${paths.backups(account.linuxUser)}/${backup.fileName}`;
     const st = await stat(file).catch(() => null);
+    if (!st && !(await serverOf(account.serverId)).isMain) throw badRequest("This account is on another server: download the backup from your remote storage, or restore it from here.");
     if (!st) throw notFound(backup.remote ? "Not on this server any more; it is in remote storage. Restore it, or download it from your bucket." : "Backup file no longer exists");
     await audit(req, "backup.download", "backup", backup.id);
     return reply

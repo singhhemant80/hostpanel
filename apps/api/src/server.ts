@@ -8,7 +8,7 @@ import { backupScheduler } from "./routes/backups.js";
 const app = await buildApp();
 
 // Only one API process should mirror job events into Postgres.
-if (process.env.HOSTPANEL_EVENTS !== "off") startEventListener(app.log);
+if (process.env.HOSTPANEL_EVENTS !== "off") await startEventListener(app.log);
 
 const shutdown = async () => {
   await app.close();

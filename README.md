@@ -34,6 +34,18 @@ Site layout on disk:
 └─ logs/                                    access.log (Caddy), app.log (Node/Python), php-error.log
 ```
 
+## Phase 3 features
+
+| Feature | Where | How it works |
+|---|---|---|
+| **Email hosting** | Email | Mailboxes (`you@yourdomain.com`) with size limits, forwarders (to any address), catch-all. Postfix + Dovecot (IMAP/POP3, passwords bcrypt-hashed) + Rspamd (spam filter, DKIM signing). Mail is only sent after login over TLS, and only from addresses the mailbox owns. The page shows the MX/SPF/DKIM/DMARC records to create (one click when the domain is in DNS) and the settings for phone/desktop mail apps. Packages have a mailbox limit (0 = no email). |
+| **Webmail** | `https://<panel>/webmail/` | Roundcube, served by Caddy under the panel hostname. |
+| **One-click apps** | One-click apps | WordPress (with MariaDB and admin user), Laravel, Next.js, Django (admin user, static files). Each becomes a normal site with releases and rollback; the admin password is shown once. |
+| **Resellers** | Admin → Resellers | Reseller logins create and manage their own customers' accounts, limited to a number of accounts, total disk, and the packages you allow. They never see other accounts. |
+| **Multi-server** | Admin → Servers | Add servers to host accounts on. The panel shows a one-line join command for a fresh Ubuntu 24.04 server; it connects over WireGuard (UDP 51888), and its agent takes jobs from its own queue. Pick the server when creating an account. Mail, webmail and the web terminal stay on the main server. |
+
+**Email deliverability:** many VPS providers block outgoing port 25 until you ask them to open it. Set the server's reverse DNS (PTR) to the panel hostname, and create the DNS records shown on the Email page.
+
 ## Phase 2 features
 
 | Feature | Where | How it works |
@@ -97,7 +109,7 @@ curl -fsSL https://raw.githubusercontent.com/<owner>/hostpanel/main/install.sh |
   sudo bash -s -- --domain panel.example.com --email you@example.com --repo https://github.com/<owner>/hostpanel.git
 ```
 
-It installs Caddy (+ Cloudflare DNS module for wildcards), PostgreSQL, Redis, MariaDB, PHP 8.1–8.4 (ondrej), Node 20/22/24, Python 3.11–3.13 (uv), Composer, rclone; sets up SFTP/SSH rules for hosting accounts; creates the database, secrets and services (`hostpanel-api`, `hostpanel-agent`); opens ports 22/80/443; and writes the admin login to `/root/hostpanel-admin.txt`. Choose versions with `--php "8.3 8.4" --node "22" --python "3.12"`. Re-run the same command (or `sudo bash /opt/hostpanel/update.sh`) to upgrade.
+It installs Caddy (+ Cloudflare DNS module for wildcards), PostgreSQL, Redis, MariaDB, PHP 8.1–8.4 (ondrej), Node 20/22/24, Python 3.11–3.13 (uv), Composer, rclone; sets up SFTP/SSH rules for hosting accounts; creates the database, secrets and services (`hostpanel-api`, `hostpanel-agent`); sets up mail (Postfix, Dovecot, Rspamd, Roundcube; skip with `--no-mail`) and the WireGuard network for extra servers; opens ports 22/80/443, mail ports 25/465/587/993/995 and 51888/udp; and writes the admin login to `/root/hostpanel-admin.txt`. Choose versions with `--php "8.3 8.4" --node "22" --python "3.12"`. Re-run the same command (or `sudo bash /opt/hostpanel/update.sh`) to upgrade.
 
 **Back up `apps/api/.env`.** `APP_ENCRYPTION_KEY` encrypts environment variables, database passwords and 2FA secrets.
 
@@ -167,4 +179,6 @@ Done (phase 1): accounts & packages, sites in 4 runtimes with version choice, do
 
 Done (phase 2): file manager, SFTP/SSH access, web terminal, cron jobs, nightly + manual backups with restore and S3-compatible off-site copies, Cloudflare DNS editor with templates, live logs, resource usage, custom SSL upload, wildcard domains.
 
-Next (phase 3): email (Postfix/Dovecot/Rspamd/Roundcube), one-click apps (WordPress, Laravel, Next.js, Django), resellers, multi-server, self-hosted DNS (PowerDNS).
+Done (phase 3): email hosting with webmail, DKIM and DNS records; one-click WordPress/Laravel/Next.js/Django; resellers; multi-server over WireGuard.
+
+Next: self-hosted DNS (PowerDNS), moving accounts between servers, mail on extra servers.

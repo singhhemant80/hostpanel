@@ -1,7 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import jwt from "jsonwebtoken";
 import { hash, verify } from "@node-rs/argon2";
-import { eq, inArray, type SQL, type AnyColumn } from "drizzle-orm";
+import { eq, inArray, or, type SQL, type AnyColumn } from "drizzle-orm";
 import { config } from "./config.js";
 import { db, schema } from "./db.js";
 import type { Role } from "./schema.js";
@@ -106,8 +106,16 @@ export function currentUser(req: FastifyRequest): AuthUser {
 /** Account ids the user may see, or null for "all" (admins). */
 export async function visibleAccountIds(user: AuthUser): Promise<string[] | null> {
   if (user.role === "admin") return null;
-  const rows = await db.select({ id: schema.accounts.id }).from(schema.accounts).where(eq(schema.accounts.userId, user.id));
+  // resellers see their own accounts and every customer account they created
+  const where = user.role === "reseller" ? or(eq(schema.accounts.userId, user.id), eq(schema.accounts.resellerId, user.id)) : eq(schema.accounts.userId, user.id);
+  const rows = await db.select({ id: schema.accounts.id }).from(schema.accounts).where(where);
   return rows.map((r) => r.id);
+}
+
+/** preHandler: admins and resellers (resellers are further limited to their own customers). */
+export async function requireAdminOrReseller(req: FastifyRequest): Promise<void> {
+  await requireAuth(req);
+  if (req.user?.role !== "admin" && req.user?.role !== "reseller") throw forbidden("Admins and resellers only");
 }
 
 /** WHERE fragment limiting `column` (an account id column) to the user's accounts; undefined for admins. */

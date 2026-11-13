@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { createReadStream, createWriteStream, type WriteStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
+import type { Writable } from "node:stream";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { env } from "./env.js";
 
@@ -10,7 +11,7 @@ export interface RunOpts {
   input?: string | Buffer;
   timeoutSec?: number;
   /** Stream combined stdout/stderr here (deploy logs). */
-  log?: WriteStream;
+  log?: Writable;
   /** Run even in dry-run mode (safe, unprivileged commands such as git or a build in the sandbox). */
   alwaysRun?: boolean;
   /** Non-zero exit is not an error. */
@@ -112,7 +113,7 @@ export function run(cmd: string, args: string[], opts: RunOpts = {}): Promise<Ru
 export async function runAsUser(
   linuxUser: string,
   command: string,
-  opts: { cwd: string; env: Record<string, string>; log: WriteStream; timeoutSec: number },
+  opts: { cwd: string; env: Record<string, string>; log: Writable; timeoutSec: number },
 ): Promise<RunResult> {
   if (env.dryRun) {
     // In the sandbox the build runs as the current user, still without a login shell.

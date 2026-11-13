@@ -7,7 +7,7 @@ import { db, schema } from "../db.js";
 import { decrypt, encrypt } from "../crypto.js";
 import { badRequest, conflict, forbidden, notFound } from "../errors.js";
 import { accountFilter, audit, currentUser, requireAdmin, requireAuth } from "../auth.js";
-import { resolveAccount } from "../access.js";
+import { canSee, resolveAccount } from "../access.js";
 import { Cloudflare, dnsTemplate, fqdn } from "../cloudflare.js";
 import { getSetting, setSetting } from "../settings.js";
 
@@ -21,7 +21,7 @@ async function ownedZone(req: FastifyRequest, id: string) {
   const zone = await db.query.dnsZones.findFirst({ where: eq(schema.dnsZones.id, id), with: { account: true } });
   if (!zone) throw notFound("Zone not found");
   const user = currentUser(req);
-  if (user.role !== "admin" && zone.account.userId !== user.id) throw forbidden();
+  if (!(await canSee(user, zone.account))) throw forbidden();
   return zone;
 }
 

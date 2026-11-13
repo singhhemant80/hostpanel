@@ -4,13 +4,14 @@ import { useTranslation } from "react-i18next";
 import { api, del, patch, post, type Package } from "../api";
 import { Button, Card, ErrorText, Field, Input, Modal, Table } from "../components/ui";
 
-const blank = { name: "", diskMb: 5000, bandwidthGb: 100, maxSites: 1, maxDomains: 3, maxDatabases: 1, cpuPercent: 50, ramMb: 512 };
+const blank = { name: "", diskMb: 5000, bandwidthGb: 100, maxSites: 1, maxDomains: 3, maxDatabases: 1, maxMailboxes: 10, cpuPercent: 50, ramMb: 512 };
 const numeric: { key: keyof typeof blank; label: string }[] = [
   { key: "diskMb", label: "Disk (MB)" },
   { key: "bandwidthGb", label: "Bandwidth (GB/month)" },
   { key: "maxSites", label: "Sites" },
   { key: "maxDomains", label: "Domains" },
   { key: "maxDatabases", label: "Databases" },
+  { key: "maxMailboxes", label: "Mailboxes (0 = no email)" },
   { key: "cpuPercent", label: "CPU (% of one core)" },
   { key: "ramMb", label: "RAM (MB)" },
 ];
@@ -45,7 +46,7 @@ export function PackagesPage() {
               <td className="px-5 py-3 font-medium">{p.name}</td>
               <td className="px-5 py-3">{(p.diskMb / 1000).toFixed(0)} GB</td>
               <td className="px-5 py-3">
-                {p.maxSites} / {p.maxDomains} / {p.maxDatabases}
+                {p.maxSites} / {p.maxDomains} / {p.maxDatabases} / {p.maxMailboxes}
               </td>
               <td className="px-5 py-3">
                 {p.cpuPercent}% · {p.ramMb >= 1024 ? `${p.ramMb / 1024} GB` : `${p.ramMb} MB`}
