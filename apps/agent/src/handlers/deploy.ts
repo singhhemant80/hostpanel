@@ -202,7 +202,17 @@ export async function restartApp(site: SiteSpec, log: { stream: Writable; line: 
     await writeEnvFile(site);
     // Rolling restart: one instance at a time so multi-instance sites never drop traffic.
     for (const unit of serviceUnits(site)) {
-      await run("systemctl", ["restart", unit], { log: log.stream });
+      try {
+        await run("systemctl", ["restart", unit], { log: log.stream });
+      } catch (e) {
+        // Put the real reason in the deploy log: systemd's own message only says "see journalctl".
+        log.line(`--- why ${unit} did not start ---`);
+        const st = await run("systemctl", ["status", "--no-pager", "-l", "-n", "0", unit], { allowFail: true });
+        const jr = await run("journalctl", ["-u", unit, "-n", "25", "--no-pager", "-o", "cat"], { allowFail: true });
+        const app = await run("tail", ["-n", "40", `/home/${site.linuxUser}/sites/${site.name}/logs/app.log`], { allowFail: true });
+        for (const part of [st.stdout, jr.stdout, app.stdout ? `app.log:\n${app.stdout}` : ""]) if (part?.trim()) log.stream.write(part.trimEnd() + "\n");
+        throw e;
+      }
       if (site.instances > 1) await new Promise((r) => setTimeout(r, 2000));
     }
     log.line(`Restarted ${site.instances} instance(s)`);
