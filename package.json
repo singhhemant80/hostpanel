@@ -1,0 +1,22 @@
+{
+  "name": "hostpanel",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Self-hosted cPanel-style control panel: multi-domain, multi-runtime (PHP, Node.js, Python, static) hosting with GitHub deploys",
+  "workspaces": [
+    "packages/shared",
+    "apps/api",
+    "apps/agent",
+    "apps/web"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/shared && npm run build -w apps/api && npm run build -w apps/agent && npm run build -w apps/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:migrate": "npm run db:migrate -w apps/api",
+    "db:seed": "npm run db:seed -w apps/api",
+    "test": "npm test -w apps/agent && npm test -w apps/api"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,230 @@
+{
+  "app": {
+    "name": "HostPanel"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "sites": "Sites",
+    "domains": "Domains",
+    "databases": "Databases",
+    "accounts": "Accounts",
+    "packages": "Packages",
+    "settings": "Settings",
+    "admin": "Admin",
+    "logout": "Sign out",
+    "dns": "DNS",
+    "files": "Files",
+    "backups": "Backups",
+    "access": "SFTP & usage",
+    "server": "Server"
+  },
+  "login": {
+    "title": "Sign in to HostPanel",
+    "email": "Email",
+    "password": "Password",
+    "totp": "Authenticator code",
+    "submit": "Sign in"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "create": "Create",
+    "delete": "Delete",
+    "add": "Add",
+    "loading": "Loading…",
+    "confirmDelete": "Delete {{name}}? This cannot be undone.",
+    "none": "Nothing here yet",
+    "status": "Status",
+    "actions": "Actions",
+    "copy": "Copy",
+    "copied": "Copied"
+  },
+  "dashboard": {
+    "welcome": "Welcome, {{name}}",
+    "recentDeploys": "Recent deployments",
+    "server": "Server"
+  },
+  "sites": {
+    "new": "New site",
+    "name": "Site name",
+    "runtime": "Runtime",
+    "version": "Version",
+    "primaryDomain": "Primary domain",
+    "rootDir": "App folder in repo",
+    "publicDir": "Public folder",
+    "buildCmd": "Build command",
+    "startCmd": "Start command",
+    "instances": "Instances",
+    "healthPath": "Health check path",
+    "background": "Background worker (no domain, e.g. queue worker)",
+    "deploy": "Deploy now",
+    "start": "Start",
+    "stop": "Stop",
+    "restart": "Restart",
+    "running": "Running",
+    "stopped": "Stopped",
+    "tabs": {
+      "overview": "Overview",
+      "deployments": "Deployments",
+      "github": "GitHub",
+      "domains": "Domains",
+      "env": "Environment",
+      "settings": "Settings",
+      "cron": "Cron",
+      "logs": "Logs",
+      "terminal": "Terminal"
+    },
+    "lastDeploy": "Last deploy",
+    "neverDeployed": "Not deployed yet",
+    "rollback": "Roll back",
+    "viewLog": "Log"
+  },
+  "github": {
+    "repo": "Repository (owner/repo)",
+    "branch": "Branch",
+    "autoDeploy": "Deploy automatically on every push",
+    "connect": "Connect repository",
+    "disconnect": "Disconnect",
+    "install": "Install the GitHub App",
+    "notConfigured": "The GitHub App is not set up on this server yet, so only public repositories can be deployed. An admin can add it in apps/api/.env.",
+    "detect": "Detect runtime"
+  },
+  "domains": {
+    "add": "Add domain",
+    "hostname": "Domain",
+    "site": "Site",
+    "type": "Type",
+    "ssl": "SSL",
+    "dns": "DNS",
+    "check": "Check DNS",
+    "makePrimary": "Make primary",
+    "redirectTo": "Redirect to URL",
+    "pathRules": "Path rules",
+    "pathRulesHint": "Send part of this domain to another app, e.g. /api/* → your API site. Everything else goes to this site.",
+    "pointTo": "Point an A record to {{ip}}"
+  },
+  "databases": {
+    "new": "New database",
+    "engine": "Engine",
+    "name": "Name",
+    "user": "User",
+    "showCredentials": "Show credentials",
+    "passwordOnce": "Save this password now. You can reveal it again later from this page."
+  },
+  "accounts": {
+    "new": "New account",
+    "username": "Username",
+    "package": "Package",
+    "suspend": "Suspend",
+    "unsuspend": "Unsuspend"
+  },
+  "packages": {
+    "new": "New package"
+  },
+  "settings": {
+    "profile": "Profile",
+    "language": "Language",
+    "password": "Change password",
+    "current": "Current password",
+    "next": "New password (10+ characters)",
+    "twofa": "Two-factor authentication",
+    "enable2fa": "Turn on 2FA",
+    "disable2fa": "Turn off 2FA",
+    "scan": "Add this secret to Google Authenticator, Authy or 1Password, then enter the 6-digit code.",
+    "nightly": "Run nightly backups of every account",
+    "hour": "Time (server clock)",
+    "keep": "Copies to keep on this server",
+    "remote": "Also copy to S3-compatible storage (Backblaze B2, Cloudflare R2, AWS S3, Wasabi)",
+    "keepSecret": "Saved. Leave empty to keep it.",
+    "dnsHint": "Connect Cloudflare to manage DNS records from the panel and to issue wildcard certificates (*.example.com).",
+    "cfAccount": "Needed only to create new zones from the panel"
+  },
+  "files": {
+    "newFolder": "Folder",
+    "newFile": "File",
+    "upload": "Upload",
+    "uploading": "Uploading",
+    "selected": "{{n}} selected",
+    "compress": "Zip",
+    "rename": "Rename",
+    "permissions": "Permissions",
+    "extract": "Extract",
+    "name": "Name",
+    "size": "Size",
+    "modified": "Modified",
+    "mode": "Mode",
+    "empty": "This folder is empty"
+  },
+  "backups": {
+    "now": "Back up now",
+    "when": "When",
+    "contents": "Contents",
+    "download": "Download",
+    "restore": "Restore",
+    "none": "No backups yet. Nightly backups run automatically once enabled by the admin.",
+    "hint": "Each backup holds the live version of every site (with uploads) and a dump of every database. Restoring replaces the current files/data of what you tick.",
+    "restoreWarn": "This replaces the current files of the chosen sites and the current data of the chosen databases with the copy from this backup."
+  },
+  "dns": {
+    "notConfigured": "DNS management is not set up yet. An admin can connect Cloudflare under Server.",
+    "addZone": "Manage a domain's DNS",
+    "addZoneHint": "The domain must be in your Cloudflare account, or the admin must allow creating zones.",
+    "templates": "Add records…",
+    "tplWeb": "Point to this server (A + www)",
+    "record": "Add record",
+    "editRecord": "Edit record",
+    "proxied": "Proxy through Cloudflare (orange cloud)",
+    "setNameservers": "Set these nameservers at your domain registrar:"
+  },
+  "access": {
+    "usage": "Resource usage",
+    "disk": "Disk",
+    "ram": "Memory",
+    "limit": "limit",
+    "cpuUsed": "CPU used since start",
+    "processes": "processes",
+    "title": "SFTP / SSH access",
+    "host": "Host",
+    "user": "User",
+    "port": "Port",
+    "sftp": "Allow SFTP (files only, starts in your sites folder)",
+    "shell": "Allow SSH shell and the web terminal",
+    "shellAdmin": "an admin can turn this on",
+    "password": "Password",
+    "newPassword": "New password (leave empty to keep)",
+    "passwordHint": "12+ characters. Or use SSH keys below (safer).",
+    "keys": "SSH public keys",
+    "keysHint": "One per line, e.g. the contents of ~/.ssh/id_ed25519.pub"
+  },
+  "cron": {
+    "add": "Add cron job",
+    "jobs": "Cron jobs",
+    "name": "Name",
+    "schedule": "Schedule",
+    "command": "Command",
+    "commandHint": "Runs in the app folder as your user, with the site's environment variables. Output goes to the cron log.",
+    "runNow": "Run now",
+    "pause": "Pause",
+    "resume": "Resume"
+  },
+  "logs": {
+    "filter": "Filter…",
+    "follow": "Live",
+    "empty": "Nothing logged yet."
+  },
+  "terminal": {
+    "notAllowed": "The web terminal needs SSH shell access for this account. An admin can turn it on under SFTP & usage.",
+    "reconnect": "Reconnect",
+    "hint": "Runs as the account's Linux user inside its CPU/RAM limits. Closes after 30 minutes without input."
+  },
+  "ssl": {
+    "manage": "Manage SSL",
+    "customNow": "This domain uses your uploaded certificate.",
+    "dnsNow": "This wildcard gets its certificate through the DNS provider automatically.",
+    "autoNow": "This domain gets a free Let's Encrypt certificate automatically. Upload your own only if you need a specific certificate (e.g. EV/OV).",
+    "cert": "Certificate (PEM, full chain)",
+    "key": "Private key (PEM)",
+    "upload": "Use this certificate",
+    "backToAuto": "Go back to automatic SSL"
+  }
+}
